@@ -470,19 +470,22 @@ async function loadThree() {
   const status = $('loading-status');
   const label = `three.js r${THREE_VERSION.split('.')[1]}`;
   let mod = null;
-  const pending = [];
-  const attempt = (url) => import(url).then((m) => { mod = m; }, () => {});
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const racing = new Set();                       // sources that have started and not settled yet
+  const attempt = (url) => {
+    const promise = import(url).then((m) => { mod = m; }, () => {}).finally(() => racing.delete(promise));
+    racing.add(promise);
+  };
 
   for (let i = 0; i < THREE_SOURCES.length && !mod; i++) {
     status.textContent = `Loading ${label} · source ${i + 1} of ${THREE_SOURCES.length}`;
-    pending.push(attempt(THREE_SOURCES[i]));
-    // Resolves as soon as any started source settles, or when this source's window ends.
-    await Promise.race([Promise.race(pending), sleep(SOURCE_WINDOW)]);
+    attempt(THREE_SOURCES[i]);
+    // Move on once the sources still in flight have settled, or when this one's window ends.
+    await Promise.race([racing.size ? Promise.race(racing) : sleep(0), sleep(SOURCE_WINDOW)]);
   }
   if (!mod) {
     status.textContent = `Loading ${label} · waiting for a slow source`;
-    await Promise.race([Promise.all(pending), sleep(20000)]);
+    await Promise.race([Promise.all(racing), sleep(20000)]);
   }
   if (!mod) throw new Error(`Could not load ${label} from any of ${THREE_SOURCES.length} sources.`);
   return mod;
@@ -723,6 +726,10 @@ try {
 renderer.outputColorSpace = THREE.SRGBColorSpace;   // the scene is tone-mapped and encoded by the composite pass (section 4)
 renderer.toneMapping = THREE.NoToneMapping;
 renderer.info.autoReset = false;   // draw stats are summed over every pass, reset once per frame
+canvas.addEventListener('webglcontextlost', (event) => {
+  event.preventDefault();
+  showError('The graphics context was lost, which happens when the GPU runs out of memory or its driver resets. Reload to continue.');
+});
 
 const scene = new THREE.Scene();
 const FOG_COLOR = new THREE.Color('#2a1146');
@@ -2053,7 +2060,7 @@ function makeParticleAtlas() {
       let alpha = 0;
       if (r < radius) {
         if (tx === 1 && ty === 1) alpha = (1 - r / radius) ** 3;
-        else alpha = clamp((1 - r / radius) * (0.35 + 1.5 * fbm(u * 9 + tx * 31.7, v * 9 + ty * 17.3)), 0, 1) ** 1.4;
+        else alpha = clamp((1 - r / radius - 0.08) * (0.15 + 1.7 * fbm(u * 11 + tx * 31.7, v * 11 + ty * 17.3)) * 1.6, 0, 1) ** 1.3;
       }
       const value = Math.round(alpha * 255), i = (py * size + px) * 4;
       image.data[i] = image.data[i + 1] = image.data[i + 2] = image.data[i + 3] = value;
@@ -2478,17 +2485,17 @@ function emitRacerEffects(car, dt) {
 
   // engines: vapour that inherits some of the car's speed, then drifts up and thins out
   if (speed > 6) {
-    const rate = (14 + speed * 0.7) * (1 + boost * 1.4);
+    const rate = (30 + speed * 1.8) * (1 + boost * 1.4);
     for (let i = 0; i < 2; i++) {
       car.emit[i] += rate * dt * 0.5;
       while (car.emit[i] >= 1) {
         car.emit[i] -= 1;
         nozzles[i].getWorldPosition(fxPoint);
         const rx = Math.random() - 0.5, ry = Math.random() - 0.5, rz = Math.random() - 0.5;
-        const k = (0.8 + boost) * (0.7 + Math.random() * 0.5);
-        particles.spawn(VAPOUR, fxPoint.x + rx * 0.25, fxPoint.y + ry * 0.25, fxPoint.z + rz * 0.25,
-          car.vx * 0.4 + sin * (3 + boost * 10) + rx * 2.6, 0.5 + ry * 1.6, car.vz * 0.4 + cos * (3 + boost * 10) + rz * 2.6,
-          0.45 + Math.random() * 0.4, (0.5 + Math.random() * 0.45) * (1 + boost * 0.5), color.r * k, color.g * k, color.b * k, Math.random());
+        const k = (0.42 + boost * 0.5) * (0.6 + Math.random() * 0.7);
+        particles.spawn(VAPOUR, fxPoint.x + rx * 0.4, fxPoint.y + ry * 0.4, fxPoint.z + rz * 0.4,
+          car.vx * 0.4 + sin * (3 + boost * 10) + rx * 4, 0.5 + ry * 2.4, car.vz * 0.4 + cos * (3 + boost * 10) + rz * 4,
+          0.45 + Math.random() * 0.4, (0.6 + Math.random() * 0.8) * (1 + boost * 0.5), color.r * k, color.g * k, color.b * k, Math.random());
       }
     }
   }
@@ -2504,8 +2511,8 @@ function emitRacerEffects(car, dt) {
         tails[i].getWorldPosition(fxPoint);
         particles.spawn(SMOKE, fxPoint.x, car.y + 0.25 + Math.random() * 0.25, fxPoint.z,
           slideX * 0.35 + (Math.random() - 0.5) * 3, 0.4 + Math.random() * 0.8, slideZ * 0.35 + (Math.random() - 0.5) * 3,
-          0.7 + Math.random() * 0.5, 0.9 + Math.random() * 0.7,
-          lerp(color.r, 1, 0.45) * 1.1, lerp(color.g, 1, 0.45) * 1.1, lerp(color.b, 1, 0.45) * 1.1, Math.random());
+          0.7 + Math.random() * 0.5, 1.3 + Math.random() * 1.0,
+          lerp(color.r, 1, 0.45) * 0.6, lerp(color.g, 1, 0.45) * 0.6, lerp(color.b, 1, 0.45) * 0.6, Math.random());
       }
     }
   }
@@ -3086,7 +3093,13 @@ class AudioEngine {
   create() {
     const Context = window.AudioContext || window.webkitAudioContext;
     if (!Context) return;
-    const A = (this.ctx = new Context());
+    let A;
+    try {
+      A = new Context();
+    } catch {                                      // no audio device, or a quota on contexts: play in silence
+      return;
+    }
+    this.ctx = A;
     this.master = A.createGain();
     this.master.gain.value = this.muted ? 0 : 0.8;
     const limiter = A.createDynamicsCompressor();
@@ -3337,7 +3350,11 @@ function readInput(dt) {
   let drift = keys.has('Space') || touch.drift;
   let nitro = keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.nitro;
   if (document.body.classList.contains('touch') && !brake) throttle = 1;        // touch screens auto-accelerate
-  for (const pad of navigator.getGamepads ? navigator.getGamepads() : []) {     // left stick, RT, LT, A, B/X
+  let pads = [];
+  try {                                           // refused inside frames without the gamepad permission
+    pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  } catch { pads = []; }
+  for (const pad of pads) {                       // left stick, RT, LT, A, B/X
     if (!pad) continue;
     steer = clamp(steer + (Math.abs(pad.axes[0]) > 0.15 ? pad.axes[0] : 0), -1, 1);
     throttle = Math.max(throttle, pad.buttons[7]?.value || 0);
@@ -3405,13 +3422,13 @@ let lastTime = performance.now();
 let firstFrame = true;
 let renderPaused = false;
 
-// Resolution adapts to the machine. It starts no larger than about five megapixels, steps
+// Resolution adapts to the machine. It starts no larger than about six megapixels, steps
 // down if frames run long, and only steps back up when frames come much faster than 60 Hz
 // (so a vsync-locked display never oscillates).
 const quality = { scale: 1, average: 16.7, settle: 2.5, lastChange: -1e9 };
 function resize() {
   const width = window.innerWidth, height = Math.max(window.innerHeight, 1);
-  const cap = Math.sqrt(5e6 / (width * height));
+  const cap = Math.sqrt(6e6 / (width * height));
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2, cap) * quality.scale);
   renderer.setSize(width, height, false);
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -3441,12 +3458,12 @@ function adaptQuality(dt) {
   if (quality.settle > 0) return;                  // ignore the first moments after a change or a stall
   quality.average = lerp(quality.average, dt * 1000, 0.05);
   const now = performance.now() / 1000;
-  if (now - quality.lastChange < 2.5) return;
+  if (now - quality.lastChange < 1.5) return;
   if (quality.average > 21 && quality.scale > 0.5) {
     quality.scale = Math.max(0.5, quality.scale - 0.15);
     quality.lastChange = now;
     resize();
-    quality.settle = 1.5;
+    quality.settle = 1.2;
   } else if (quality.average < 12 && quality.scale < 1) {
     quality.scale = Math.min(1, quality.scale + 0.1);
     quality.lastChange = now + 4;                  // back off for longer before trying another step up

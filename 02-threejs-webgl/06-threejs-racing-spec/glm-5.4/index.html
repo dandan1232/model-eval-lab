@@ -159,6 +159,10 @@
 <div id="err" class="hidden">Three.js could not be loaded from the CDN.<br>Please check your internet connection and reload the page.</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- CDN fallbacks: each mirror is only fetched when the previous one did not load (separate blocks, so each check
+     runs after the mirror written by the previous block has finished loading) -->
+<script>if (typeof THREE === 'undefined') document.write('<script src="https://unpkg.com/three@0.128.0/build/three.min.js"><\/script>');</script>
+<script>if (typeof THREE === 'undefined') document.write('<script src="https://cdn.bootcdn.net/ajax/libs/three.js/r128/three.min.js"><\/script>');</script>
 <script>
 /* ============================================================
    APEX RUSH — single-file 3D arcade racer
@@ -449,14 +453,14 @@ function buildStrips(t0, step, count, section, quads, colorAt) {
 
 const colAsphalt = C(0x454952), colAsphaltDark = C(0x41454e), colLine = C(0xf4f4f0), colCurbR = C(0xe23b2e),
       colCurbW = C(0xf7f7f4), colVerge = C(0x58aa43), colWallTop = C(0xd8dce3), colBlack = C(0x15161a);
-const ROAD_BANDS = [   // [outer offset, inner offset, lift]
-  [-12.2, -8.3, 0.02], [-8.3, -7.0, 0.07], [-7.0, -6.72, 0.055], [-6.72, -0.16, 0.04], [-0.16, 0.16, 0.055],
-  [0.16, 6.72, 0.04], [6.72, 7.0, 0.055], [7.0, 8.3, 0.07], [8.3, 12.2, 0.02]
+const LIFT = 0.04;    // every band sits at the same height so no seam shows between them
+const ROAD_BANDS = [   // [outer offset, inner offset]
+  [-12.2, -8.3], [-8.3, -7.0], [-7.0, -6.72], [-6.72, -0.16], [-0.16, 0.16], [0.16, 6.72], [6.72, 7.0], [7.0, 8.3], [8.3, 12.2]
 ];
 const roadSection = t => {
   const fr = frameAt(t), out = [];
   for (const b of ROAD_BANDS) {
-    out.push(fr.x + fr.rx * b[0], fr.y + b[2], fr.z + fr.rz * b[0], fr.x + fr.rx * b[1], fr.y + b[2], fr.z + fr.rz * b[1]);
+    out.push(fr.x + fr.rx * b[0], fr.y + LIFT, fr.z + fr.rz * b[0], fr.x + fr.rx * b[1], fr.y + LIFT, fr.z + fr.rz * b[1]);
   }
   return out;
 };
@@ -784,9 +788,9 @@ function makeCarMesh(hex) {
   return { group: g, body, wheels, tail };
 }
 const CAR_DEFS = [
-  { name: 'NITRO', color: 0xffc400, skill: 0.945, vmax: 55, lane: -0.9 },
-  { name: 'BOLT', color: 0x8b5cff, skill: 0.885, vmax: 53, lane: 0.9 },
-  { name: 'ACE', color: 0x1fc16b, skill: 0.83, vmax: 50, lane: 0 },
+  { name: 'NITRO', color: 0xffc400, skill: 0.915, vmax: 54, lane: -0.9 },
+  { name: 'BOLT', color: 0x8b5cff, skill: 0.86, vmax: 52, lane: 0.9 },
+  { name: 'ACE', color: 0x1fc16b, skill: 0.81, vmax: 49.5, lane: 0 },
   { name: 'YOU', color: 0xff3b30, skill: 0.96, vmax: VMAX, lane: 0 }
 ];
 const cars = CAR_DEFS.map((d, i) => Object.assign({}, d, {
@@ -964,9 +968,9 @@ function stepCar(c, dt) {
   const rate = back ? 6 : 3.2;
   c.steerS += clamp(c.steer - c.steerS, -rate * dt, rate * dt);
   let vF = c.vx * fx + c.vz * fz, vL = -c.vx * fz + c.vz * fx;        // forward / lateral speed in the car frame
-  const grip = GRIP * (c.offroad ? 0.42 : 1) * (c.hand ? 0.5 : 1) * (vF > 1 ? 1 - 0.35 * c.brake : 1);
-  // yaw from the steering wheels, capped by how fast the tyres can redirect the car (the cap is what makes it slide)
-  const om = grip * 1.6 / Math.max(Math.abs(vF), 5);
+  const grip = GRIP * (c.offroad ? 0.42 : 1) * (c.hand ? 0.5 : 1) * (vF > 1 ? 1 - 0.35 * c.brake : 1);   // sideways grip of the tyres
+  // yaw from the steering wheels, capped by how fast the tyres can rotate the car; the handbrake trades grip for rotation
+  const om = GRIP * (c.offroad ? 0.6 : 1) * 1.6 / Math.max(Math.abs(vF), 5);
   let omega = clamp(-(vF / WHEELBASE) * Math.tan(c.steerS * steerMaxFor(sp)), -om, om);
   const beta = Math.atan2(vL, Math.abs(vF) + 0.5);
   omega *= clamp(1 - Math.abs(beta) / (c.hand ? 1.1 : 0.55), 0, 1);
@@ -979,7 +983,7 @@ function stepCar(c, dt) {
   let a = 0;
   if (c.throttle > 0) a += vF >= -0.3 ? c.throttle * ACCEL * Math.max(0, 1 - Math.pow(Math.max(vF, 0) / c.vmax, 3)) : c.throttle * BRAKE * 0.7;
   if (c.brake > 0) a -= vF > 0.3 ? c.brake * BRAKE : c.brake * ACCEL * 0.55 * Math.max(0, 1 + vF / VREV);
-  if (c.throttle === 0 && c.brake === 0) a -= vF * 0.012 + Math.sign(vF) * 0.5;
+  if (c.throttle === 0 && c.brake === 0) a -= vF * 0.012 + Math.sign(vF) * (vF < -0.3 ? 5 : 0.5);
   if (c.hand) a -= Math.sign(vF) * 7;
   if (c.offroad) a -= vF * 0.11;
   a -= 9.81 * slope[c.idx] * (fx * tx[c.idx] + fz * tz[c.idx]);
@@ -1018,6 +1022,7 @@ function trackInfo(c) {     // nearest centreline sample + unwrapped distance al
 const REF = [-1.25, 0, 1.25];   // three contact circles along the car
 function walls(c, dt) {
   const i = c.idx, fX = Math.sin(c.yaw), fZ = Math.cos(c.yaw);
+  c.scrape = Math.max(0, c.scrape - dt);
   for (const o of REF) {
     const dx = c.x + fX * o - px[i], dz = c.z + fZ * o - pz[i], lat = dx * rx[i] + dz * rz[i];
     if (Math.abs(lat) <= LIM) continue;
@@ -1025,15 +1030,19 @@ function walls(c, dt) {
     c.x += nx * pen; c.z += nz * pen;
     const vn = c.vx * nx + c.vz * nz;                        // < 0 means driving into the wall
     if (vn < 0) {
-      c.vx -= nx * vn * 1.3; c.vz -= nz * vn * 1.3;
+      c.vx -= nx * vn * 1.05; c.vz -= nz * vn * 1.05;        // the wall absorbs the impact, almost no rebound
+      const loss = 1 / (1 - vn * 0.012);                     // harder hits scrub more speed
+      c.vx *= loss; c.vz *= loss;
       if (-vn > 4 && c === player) { shake = Math.min(1, -vn / 25); sfxHit(-vn / 25); }
     }
-    const f = (c.vx * tx[i] + c.vz * tz[i]) * 0.9 * dt;      // grinding slows the car
+    c.scrape = 0.5; c.scrapeS = sg;
+  }
+  if (c.scrape > 0 && c.lat * c.scrapeS > LIM - 1.2) {       // still hugging that wall
+    let e = wrapAng(c.yaw - yawT[i]);
+    if (Math.abs(e) > Math.PI / 2) e = wrapAng(e + Math.PI);
+    if (e * c.scrapeS < 0) c.yaw -= Math.sign(e) * Math.min(Math.abs(e), 4 * dt);   // swing the nose parallel (never fight a turn away)
+    const f = (c.vx * tx[i] + c.vz * tz[i]) * 0.25 * dt;     // grinding slows the car
     c.vx -= tx[i] * f; c.vz -= tz[i] * f;
-    if (o !== 0) {                                            // nudge whichever end is pointing at the wall parallel to it
-      const wX = sg * rx[i], wZ = sg * rz[i], into = (fX * wX + fZ * wZ) * Math.sign(o);
-      if (into > 0) c.yaw += into * ((-fZ * wX + fX * wZ) >= 0 ? 1 : -1) * Math.min(pen, 0.5) * 14 * dt;
-    }
   }
 }
 function collideCars() {
@@ -1111,7 +1120,7 @@ function placeOnGrid() {
     Object.assign(c, {
       x: px[i] + rx[i] * lat, z: pz[i] + rz[i] * lat, yaw: yawT[i], vx: 0, vz: 0, vy: py[i] + 0.05,
       idx: i, lat, along: 0, s: i * ds, dist: i * ds, prog: 0, offroad: false, slip: false, omega: 0, accel: 0,
-      pitch: 0, steer: 0, steerS: 0, throttle: 0, brake: 0, hand: false, stuck: 0, finished: false, finT: 0,
+      pitch: 0, steer: 0, steerS: 0, throttle: 0, brake: 0, hand: false, stuck: 0, scrape: 0, finished: false, finT: 0,
       lapsDone: 0, lapsMax: -1, pos: k + 1, isAI: k < 3
     });
     c.mesh.group.position.set(c.x, c.vy, c.z);
@@ -1132,10 +1141,10 @@ function startRace() {
   $('hud').classList.add('on');
 }
 function resetRace() { startRace(); }
-function stepSim(dt) {
+function stepSim(dt, real) {
   if (state === 'title') return;
   if (state === 'countdown') {
-    cdT += dt;
+    cdT += real || dt;                  // the grid is stationary, so wall-clock time is the right clock here
     const n = 3 - Math.floor(cdT);
     if (n !== cdShown && n >= 1) { cdShown = n; flash(String(n), 900); sfxBeep(440, 0.14); }
     if (cdT >= 3) { state = 'racing'; raceT = 0; lapStart = 0; flash('GO!', 1000); sfxBeep(880, 0.5); }
@@ -1168,7 +1177,7 @@ function stepSim(dt) {
     flash('FINISH!', 1700, true);
     [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => sfxBeep(f, 0.3, 0.35), i * 130));
   }
-  if (state === 'finished') { finT += dt; if (finT > 1.8 && !resultsShown) { resultsShown = true; $('overlay').classList.remove('off'); } }
+  if (state === 'finished') { finT += dt; if (finT > 1.8 && !resultsShown) { resultsShown = true; $('overlay').classList.remove('off'); $('hud').classList.remove('on'); } }
   if (state === 'racing') {
     wrongT = player.vx * tx[player.idx] + player.vz * tz[player.idx] < -4 ? wrongT + dt : 0;
   } else wrongT = 0;
@@ -1215,8 +1224,8 @@ let camYaw = 0;
 function updateCamera(dt) {
   const c = player, sp = Math.hypot(c.vx, c.vz), n = Math.min(sp / VMAX, 1);
   if (state === 'title') {
-    const a = performance.now() * 0.00022;
-    camPos.lerp(v3.set(c.x + Math.sin(a) * 17, c.vy + 5, c.z + Math.cos(a) * 17), 1 - Math.exp(-dt * 2.5));
+    const a = Math.sin(performance.now() * 0.00028) * 0.95;
+    camPos.lerp(v3.set(c.x - Math.cos(a) * 16, c.vy + 4.2, c.z + Math.sin(a) * 16), 1 - Math.exp(-dt * 2.5));
     camLook.lerp(v3.set(c.x, c.vy + 6, c.z), 1 - Math.exp(-dt * 4));     // look above the car so it sits below the title card
   } else {
     const dYaw = sp > 4 ? c.yaw + wrapAng(Math.atan2(c.vx, c.vz) - c.yaw) * 0.45 : c.yaw;   // follow the slide, not just the nose
@@ -1355,15 +1364,32 @@ function drawMini() {
 /* ---------- main loop ---------- */
 $('restart').addEventListener('click', resetRace);
 placeOnGrid();
-camPos.set(player.x - 30, 75, player.z + 150);
-camLook.set(player.x, player.y + 1, player.z);
+camPos.set(player.x - 95, 34, player.z + 6);
+camLook.set(player.x, player.vy + 1, player.z);
 
-let last = performance.now();
+let last = performance.now(), fpsT = 0, fpsN = 0, warm = 2;
+document.addEventListener('visibilitychange', () => { warm = 2; fpsT = 0; fpsN = 0; });
+function adaptQuality(raw) {        // if the machine clearly cannot keep up, trade resolution for a smoother ride
+  warm -= raw;
+  if (warm > 0 || raw > 0.25 || document.visibilityState !== 'visible') return;
+  fpsT += raw;
+  fpsN++;
+  if (fpsT < 3) return;
+  const fps = fpsN / fpsT;
+  fpsT = 0;
+  fpsN = 0;
+  if (fps < 28 && renderer.getPixelRatio() > 0.6) {
+    renderer.setPixelRatio(Math.max(0.6, renderer.getPixelRatio() * 0.75));
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+  }
+}
 function loop(now) {
   requestAnimationFrame(loop);
-  const dt = Math.min((now - last) / 1000, 0.05);
+  const raw = (now - last) / 1000;
+  const dt = Math.min(raw, 0.05);
   last = now;
-  stepSim(dt);
+  adaptQuality(raw);
+  stepSim(dt, raw);
   for (const c of cars) syncCar(c, dt);
   updateParticles(dt);
   syncLamps();

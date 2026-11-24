@@ -1,0 +1,2146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>明月松间照 · 清泉石上流 | three.js</title>
+<meta name="description" content="王维《山居秋暝》「明月松间照，清泉石上流」的三维意境：月下松林，石上清泉。three.js 实时渲染，单文件，无外部素材。">
+<meta name="theme-color" content="#05080f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2305080f'/%3E%3Ccircle cx='23' cy='22' r='10' fill='%23f3ead3'/%3E%3Cpath d='M4 45c10-6 18 4 28-2s18-2 28 2v6c-10-4-18-8-28-2s-18 4-28-2z' fill='%237fa7d9'/%3E%3C/svg%3E">
+<style>
+:root {
+  --ink: #ece4d2;
+  --ink-dim: rgba(236, 228, 210, 0.6);
+  --line: rgba(236, 228, 210, 0.24);
+  --night: #05080f;
+  --seal: #a3312a;
+  --kai: "Kaiti SC", "STKaiti", "KaiTi", "FZKai-Z03", "AR PL UKai CN", "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden; background: var(--night); color: var(--ink);
+  font-family: var(--sans); -webkit-font-smoothing: antialiased;
+  user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+#scene { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#scene.is-dragging { cursor: grabbing; }
+
+/* ---- 题诗：竖排，自右向左 */
+#poem {
+  position: fixed; top: max(5.5vh, 26px); right: max(4vw, 18px); z-index: 3;
+  writing-mode: vertical-rl; pointer-events: none;
+  font-family: var(--kai); color: var(--ink);
+  text-shadow: 0 0 16px rgba(3, 6, 12, 0.92), 0 2px 6px rgba(3, 6, 12, 0.8);
+}
+#poem .verse { margin-left: 0.1em; font-size: clamp(28px, 4.3vw, 62px); line-height: 1.34; letter-spacing: 0.1em; }
+#poem .ch { display: inline-block; opacity: 0; }
+body.is-ready #poem .ch { animation: ch-in 1.7s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i) * 130ms + 600ms); }
+@keyframes ch-in {
+  from { opacity: 0; transform: translateY(-14px); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+#poem .credit {
+  margin: 0.3em 0.7em 0 0; padding-top: 0.3em; font-size: clamp(12px, 1.05vw, 16px);
+  line-height: 1.7; letter-spacing: 0.3em; color: var(--ink-dim);
+  opacity: 0; transition: opacity 2.2s ease 2.3s;
+}
+body.is-ready #poem .credit { opacity: 1; }
+#poem .credit .title { font-size: 1.4em; color: var(--ink); }
+#poem .seal {
+  margin-top: 1.2em; width: 2.6em; height: 2.6em; border-radius: 3px; background: var(--seal); color: #f4e6d8;
+  font-size: 0.95em; line-height: 1.15; letter-spacing: 0.02em; text-align: center;
+  box-shadow: inset 0 0 0 1px rgba(244, 230, 216, 0.5), inset 0 0 5px rgba(70, 10, 8, 0.7), 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+#poem .seal span { display: block; }
+
+/* ---- 操作条 */
+#controls {
+  position: fixed; left: max(20px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: calc(100vw - 40px);
+}
+.group { display: flex; border: 1px solid var(--line); }
+.chip {
+  appearance: none; border: 0; margin: 0; background: rgba(6, 10, 20, 0.46); color: var(--ink-dim);
+  font: 500 13px/1 var(--sans); letter-spacing: 0.22em; padding: 10px 12px 10px 15px; cursor: pointer;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  transition: color 0.25s ease, background 0.25s ease; touch-action: manipulation;
+}
+.group .chip + .chip { border-left: 1px solid var(--line); }
+.chip.solo { border: 1px solid var(--line); }
+.chip:hover, .chip:focus-visible { color: var(--ink); background: rgba(236, 228, 210, 0.1); outline: none; }
+.chip.is-active, .chip[aria-pressed="true"] { color: #0b1020; background: var(--ink); }
+.chip[aria-pressed]::before {
+  content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 8px; border-radius: 50%;
+  background: currentColor; opacity: 0.55; vertical-align: 1px;
+}
+#hint {
+  position: fixed; left: 50%; bottom: max(26px, env(safe-area-inset-bottom)); z-index: 3;
+  transform: translateX(-50%); margin: 0; pointer-events: none; white-space: nowrap;
+  font-size: 12px; letter-spacing: 0.14em; color: var(--ink-dim);
+  text-shadow: 0 1px 8px rgba(3, 6, 12, 0.9); transition: opacity 1.2s ease;
+}
+#hint.is-hidden { opacity: 0; }
+
+/* ---- 载入与出错 */
+.overlay { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; text-align: center; }
+#loader {
+  background: radial-gradient(120% 90% at 50% 42%, #0b1326 0%, #05080f 72%);
+  transition: opacity 1.6s ease; padding: 24px;
+}
+#loader.is-hidden { opacity: 0; pointer-events: none; }
+#loader .line { font-family: var(--kai); font-size: clamp(18px, 2.6vw, 30px); letter-spacing: 0.3em; color: var(--ink); }
+#loader .line em { font-style: normal; color: var(--ink-dim); }
+#loading-status { margin-top: 20px; min-height: 1.5em; font-size: 12px; letter-spacing: 0.32em; color: var(--ink-dim); }
+.bar { width: 180px; height: 1px; margin: 14px auto 0; background: rgba(236, 228, 210, 0.14); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--ink); transition: width 0.5s ease; }
+#error { background: var(--night); padding: 24px; }
+#error.is-hidden, .is-gone { display: none; }
+#error p { max-width: 30em; margin: 0 auto 20px; font-size: 15px; line-height: 1.8; color: var(--ink-dim); }
+#error h1 { margin: 0 0 12px; font: 400 24px/1.3 var(--kai); letter-spacing: 0.2em; }
+
+/* ---- 窄屏与矮屏 */
+/* On a phone in portrait the poem keeps the top right, so the hint goes to the top left without the
+   keyboard notes; on a short wide screen it tucks into the bottom right, clear of the controls. */
+@media (max-width: 640px) {
+  #poem { top: max(3.5vh, 16px); right: 14px; }
+  #poem .verse { font-size: clamp(26px, 7.8vw, 40px); }
+  #poem .credit { display: none; }
+  #hint { top: max(3.5vh, 16px); bottom: auto; left: 14px; transform: none; font-size: 11px; letter-spacing: 0.08em; }
+  #hint .keys { display: none; }
+  #controls { left: max(12px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom)); gap: 6px; }
+  .chip { padding: 10px 8px 10px 11px; font-size: 12px; letter-spacing: 0.08em; }      // tight enough to stay on one row
+  .chip[aria-pressed]::before { margin-right: 6px; }
+}
+@media (max-height: 540px) {
+  #poem { top: max(3vh, 12px); }
+  #poem .verse { font-size: clamp(20px, 5.4vh, 36px); }
+  #poem .credit { font-size: 11px; }
+}
+@media (max-height: 540px) and (min-width: 641px) {
+  #hint { left: auto; right: max(20px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #poem .ch { opacity: 1; }
+  body.is-ready #poem .ch { animation: none; }
+  #poem .credit { transition: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="三维场景：明月透过松林照在石上流过的清泉上"></canvas>
+
+<div id="poem">
+  <div class="verse" aria-hidden="true"><span class="ch" style="--i:0">明</span><span class="ch" style="--i:1">月</span><span class="ch" style="--i:2">松</span><span class="ch" style="--i:3">间</span><span class="ch" style="--i:4">照</span>，</div>
+  <div class="verse" aria-hidden="true"><span class="ch" style="--i:5">清</span><span class="ch" style="--i:6">泉</span><span class="ch" style="--i:7">石</span><span class="ch" style="--i:8">上</span><span class="ch" style="--i:9">流</span>。</div>
+  <div class="credit">
+    <div class="title">山居秋暝</div>
+    <div class="author">唐 · 王维</div>
+    <div class="seal" aria-hidden="true"><span>王維</span><span>之印</span></div>
+  </div>
+</div>
+
+<nav id="controls" aria-label="视角与设置">
+  <div class="group" role="group" aria-label="视角">
+    <button class="chip is-active" data-view="spring">听泉</button>
+    <button class="chip" data-view="moon">望月</button>
+    <button class="chip" data-view="pines">松间</button>
+  </div>
+  <button class="chip solo" id="btn-drift" aria-pressed="true">漫游</button>
+  <button class="chip solo" id="btn-sound" aria-pressed="false">泉声</button>
+  <button class="chip solo is-gone" id="btn-fullscreen">全屏</button>
+</nav>
+<p id="hint">拖动环视 · 滚轮远近<span class="keys"> · 1 2 3 切换视角 · 空格暂停漫游 · M 泉声</span></p>
+
+<div id="loader" class="overlay">
+  <div>
+    <div class="line">明月松间照 <em>·</em> 清泉石上流</div>
+    <div id="loading-status">正在研墨</div>
+    <div class="bar"><i id="loading-bar"></i></div>
+  </div>
+</div>
+<div id="error" class="overlay is-hidden" role="alert">
+  <div>
+    <h1>山间起了大雾</h1>
+    <p id="error-message"></p>
+    <button class="chip solo" id="btn-retry">再试一次</button>
+  </div>
+</div>
+<noscript><style>#loader { display: none; }</style><div class="overlay"><p>这个场景需要启用 JavaScript 才能呈现。</p></div></noscript>
+
+<script type="module">
+// =====================================================================================
+//  明月松间照 · 清泉石上流 — 王维《山居秋暝》
+//  A moonlit pine valley with a stream running over stones, drawn live with WebGL.
+//  Single file, no build step. The only dependency is three.js, pulled from a CDN by
+//  a loader that falls through several mirrors (section 0). Every texture, mesh and
+//  sound is generated at start-up.
+//
+//    0. boot: three.js loader            6. pines and undergrowth
+//    1. helpers and procedural textures  7. atmosphere: mist, motes, leaves
+//    2. the valley: stream, bed, stones  8. lighting
+//    3. sky: moon, stars, clouds, ridges 9. post: HDR, bloom, moon shafts, grade
+//    4. terrain                          10. camera and views
+//    5. water                            11. ui, sound, main loop
+// =====================================================================================
+
+const $ = (id) => document.getElementById(id);
+const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+const fail = (message) => Object.assign(new Error(message), { friendly: true });   // a message meant to be shown as it is
+
+function showError(message) {
+  $('loader').classList.add('is-hidden');
+  $('error').classList.remove('is-hidden');
+  $('error-message').textContent = message;
+}
+$('btn-retry').addEventListener('click', () => location.reload());
+
+// ---------------------------------------------------------------- 0. boot
+// No single CDN is reliable everywhere, so start several in turn: each gets a short
+// exclusive window before the next one starts alongside it, and the first to finish wins.
+const THREE_VERSION = '0.187.0';
+const THREE_SOURCES = [
+  `https://registry.npmmirror.com/three/${THREE_VERSION}/files/build/three.module.js`,
+  `https://esm.sh/three@${THREE_VERSION}`,
+  `https://unpkg.com/three@${THREE_VERSION}/build/three.module.js`,
+  `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js`,
+];
+const SOURCE_WINDOW = 2500;
+
+async function loadThree() {
+  const status = $('loading-status');
+  const label = `three.js r${THREE_VERSION.split('.')[1]}`;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let mod = null;
+  const racing = new Set();                       // imports that have started and not settled yet
+  const attempt = (url) => {
+    const promise = import(url).then((m) => { if (!mod) mod = m; }, () => {}).finally(() => racing.delete(promise));
+    racing.add(promise);
+  };
+
+  for (let i = 0; i < THREE_SOURCES.length && !mod; i++) {
+    status.textContent = `正在载入 ${label} · 第 ${i + 1} 处镜像`;
+    attempt(THREE_SOURCES[i]);
+    // Move on once the sources in flight have settled, or when this one's window ends.
+    await Promise.race([racing.size ? Promise.race(racing) : sleep(0), sleep(SOURCE_WINDOW)]);
+  }
+  if (!mod) {
+    status.textContent = `正在载入 ${label} · 还在等较慢的一处镜像`;
+    await Promise.race([Promise.all(racing), sleep(20000)]);
+  }
+  if (!mod) throw fail(`无法从 ${THREE_SOURCES.length} 个镜像加载 ${label}。请检查网络连接后重试。`);
+  return mod;
+}
+
+async function main() {
+const THREE = await loadThree();
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: false, alpha: false, stencil: false, powerPreference: 'high-performance' });
+} catch (err) {
+  throw fail('当前浏览器或设备不支持 WebGL 2，无法呈现三维场景。请换用较新的 Chrome、Edge、Firefox 或 Safari。');
+}
+
+// ---------------------------------------------------------------- 1. helpers
+const params = new URLSearchParams(location.search);
+const DEBUG = params.has('debug');                // exposes window.__moon for tinkering
+const STILL = params.has('still');                // freeze the clock, for stable screenshots
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const TAU = Math.PI * 2;
+const DEG = Math.PI / 180;
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+// Smooth maximum: like Math.max, but with a rounded corner of width ~1/k.
+const smax = (a, b, k) => { const m = Math.max(a, b); return m + Math.log(1 + Math.exp(-k * Math.abs(a - b))) / k; };
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Integer lattice hash -> [0, 1). Everything procedural is seeded, so the scene is the same on every visit.
+function hash2i(ix, iy, seed) {
+  let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(seed, 1442695041);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+// Value noise in [-1, 1], on an infinite lattice or on a torus of `period` cells.
+function lattice(x, y, period, seed) {
+  const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  let xa = x0, xb = x0 + 1, ya = y0, yb = y0 + 1;
+  if (period) {
+    xa = ((xa % period) + period) % period; xb = (xb % period + period) % period;
+    ya = ((ya % period) + period) % period; yb = (yb % period + period) % period;
+  }
+  const a = hash2i(xa, ya, seed), b = hash2i(xb, ya, seed), c = hash2i(xa, yb, seed), d = hash2i(xb, yb, seed);
+  return (lerp(lerp(a, b, ux), lerp(c, d, ux), uy)) * 2 - 1;
+}
+const noise2 = (x, y, seed = 0) => lattice(x, y, 0, seed);
+
+function fbm2(x, y, octaves, seed) {
+  let sum = 0, amp = 1, norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += noise2(x, y, seed + i * 131) * amp;
+    norm += amp;
+    amp *= 0.5;
+    x = x * 2.03 + 31.7;
+    y = y * 2.03 + 17.3;
+  }
+  return sum / norm;
+}
+
+// Tileable fbm over the unit square; `period` is the number of cells across the lowest octave.
+function pfbm(u, v, octaves, period, seed) {
+  let sum = 0, amp = 1, norm = 0, p = period;
+  for (let i = 0; i < octaves; i++) {
+    sum += lattice(u * p, v * p, p, seed + i * 131) * amp;
+    norm += amp;
+    amp *= 0.5;
+    p *= 2;
+  }
+  return sum / norm;
+}
+
+// ---- textures -------------------------------------------------------------------
+// All maps come from typed arrays, so they can carry hand-built mipmaps: for foliage the
+// coarser levels keep the alpha of the finest needles instead of averaging them away.
+function dataTexture(data, w, h, { srgb = false, repeat = true, mips = null } = {}) {
+  const t = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  if (mips) { t.mipmaps = mips; t.generateMipmaps = false; }
+  else t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.wrapS = t.wrapT = repeat ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  t.needsUpdate = true;
+  return t;
+}
+
+function buildMips(data, w, h, keepAlpha = false) {
+  const mips = [];
+  let cur = data, cw = w, ch = h;
+  while (cw > 1 && ch > 1 && mips.length < 10) {
+    const nw = Math.max(1, cw >> 1), nh = Math.max(1, ch >> 1), out = new Uint8Array(nw * nh * 4);
+    for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+      let r = 0, g = 0, b = 0, a = 0, aMax = 0, wsum = 0;
+      for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) {
+        const sx = Math.min(cw - 1, x * 2 + i), sy = Math.min(ch - 1, y * 2 + j), k = (sy * cw + sx) * 4;
+        const al = cur[k + 3] / 255;
+        r += cur[k] * al; g += cur[k + 1] * al; b += cur[k + 2] * al; wsum += al; a += al; aMax = Math.max(aMax, al);
+      }
+      const o = (y * nw + x) * 4;
+      if (wsum > 0) { out[o] = r / wsum; out[o + 1] = g / wsum; out[o + 2] = b / wsum; }
+      out[o + 3] = (keepAlpha ? aMax * 0.75 + (a / 4) * 0.25 : a / 4) * 255;
+    }
+    mips.push({ data: out, width: nw, height: nh });
+    cur = out; cw = nw; ch = nh;
+  }
+  return mips;
+}
+
+const makeCanvas = (w, h = w) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+function texFromCanvas(canvas, { flip = false, repeat = false, keepAlpha = false } = {}) {
+  const { width: w, height: h } = canvas;
+  const src = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const data = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) data.set(src.subarray((flip ? h - 1 - y : y) * w * 4, (flip ? h - y : y + 1) * w * 4), y * w * 4);
+  return dataTexture(data, w, h, { srgb: true, repeat, mips: buildMips(data, w, h, keepAlpha) });
+}
+
+// Heights -> tangent-space normal map (x, y in red and green, height in blue).
+function heightToNormal(hgt, w, h, strength) {
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const hx = (hgt[y * w + ((x + 1) % w)] - hgt[y * w + ((x - 1 + w) % w)]) * strength * 0.5;
+    const hy = (hgt[((y + 1) % h) * w + x] - hgt[((y - 1 + h) % h) * w + x]) * strength * 0.5;
+    const inv = 127 / Math.hypot(hx, hy, 1), o = (y * w + x) * 4;
+    out[o] = 128 - hx * inv; out[o + 1] = 128 - hy * inv; out[o + 2] = 128 + inv; out[o + 3] = 255;
+  }
+  return out;
+}
+
+// Tileable cellular field: one feature point per cell, distances in texture units.
+function worley(w, h, cellsX, cellsY, seed) {
+  const f1 = new Float32Array(w * h).fill(9), f2 = new Float32Array(w * h).fill(9), id = new Uint16Array(w * h);
+  const px = new Float32Array(cellsX * cellsY), py = new Float32Array(cellsX * cellsY);
+  for (let cy = 0; cy < cellsY; cy++) for (let cx = 0; cx < cellsX; cx++) {
+    px[cy * cellsX + cx] = hash2i(cx, cy, seed); py[cy * cellsX + cx] = hash2i(cx, cy, seed + 1);
+  }
+  for (let y = 0; y < h; y++) {
+    const v = (y / h) * cellsY, cy = Math.floor(v);
+    for (let x = 0; x < w; x++) {
+      const u = (x / w) * cellsX, cx = Math.floor(u), k = y * w + x;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        const gx = (cx + i + cellsX) % cellsX, gy = (cy + j + cellsY) % cellsY, g = gy * cellsX + gx;
+        const dx = (cx + i + px[g] - u) / cellsX, dy = (cy + j + py[g] - v) / cellsY;
+        const d = Math.hypot(dx, dy);
+        if (d < f1[k]) { f2[k] = f1[k]; f1[k] = d; id[k] = g; } else if (d < f2[k]) f2[k] = d;
+      }
+    }
+  }
+  return { f1, f2, id };
+}
+
+function makeWaterNormal(size = 256) {
+  const H = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const u = x / size, v = y / size;
+    const warpX = pfbm(u, v, 3, 3, 12) * 0.12, warpY = pfbm(u, v, 3, 3, 13) * 0.12;      // the warp breaks up the lattice
+    H[y * size + x] = pfbm(u + warpX, v + warpY, 6, 6, 14) * 0.7 + pfbm(u + 0.37, v + 0.61, 4, 18, 15) * 0.3;
+  }
+  const sx = new Float32Array(size * size), sy = new Float32Array(size * size), out = new Uint8Array(size * size * 4);
+  let rms = 0;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const k = y * size + x;
+    sx[k] = (H[y * size + (x + 1) % size] - H[y * size + (x - 1 + size) % size]) * size * 0.5;
+    sy[k] = (H[((y + 1) % size) * size + x] - H[((y - 1 + size) % size) * size + x]) * size * 0.5;
+    rms += sx[k] * sx[k] + sy[k] * sy[k];
+  }
+  const norm = 0.55 / Math.sqrt(rms / (size * size));                                     // typical slope of 0.55
+  for (let k = 0; k < size * size; k++) {
+    const inv = 127 / Math.hypot(sx[k] * norm, sy[k] * norm, 1), o = k * 4;
+    out[o] = 128 - sx[k] * norm * inv; out[o + 1] = 128 - sy[k] * norm * inv; out[o + 2] = 128 + inv; out[o + 3] = 255;
+  }
+  return dataTexture(out, size, size);
+}
+
+function makeNoise(size = 256) {
+  const out = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const u = x / size, v = y / size, k = (y * size + x) * 4;
+    out[k] = 128 + 127 * pfbm(u, v, 5, 4, 1);
+    out[k + 1] = 128 + 127 * pfbm(u, v, 4, 8, 2);
+    out[k + 2] = 128 + 127 * pfbm(u, v, 3, 16, 3);
+    out[k + 3] = 128 + 127 * pfbm(u, v, 2, 32, 4);
+  }
+  return dataTexture(out, size, size);
+}
+
+const STONE_PALETTE = [[0.5, 0.52, 0.55], [0.36, 0.37, 0.38], [0.6, 0.6, 0.58], [0.42, 0.4, 0.37], [0.33, 0.36, 0.35], [0.5, 0.48, 0.44]];
+function stoneColor(id, seed, out) {
+  const h = hash2i(id, seed, 5) * 6, i = Math.floor(h) % 6, t = h - Math.floor(h), j = (i + 1) % 6;
+  const n = 0.88 + 0.24 * hash2i(id, seed + 9, 5);
+  for (let c = 0; c < 3; c++) out[c] = lerp(STONE_PALETTE[i][c], STONE_PALETTE[j][c], t) * n;
+  return out;
+}
+
+// River-bed gravel: cobbles in patches, finer pebbles between them, dark gaps where they meet.
+function makeStoneMaps(size = 512) {
+  const A = worley(size, size, 8, 8, 101), B = worley(size, size, 19, 19, 202);
+  const alb = new Uint8Array(size * size * 4), hgt = new Float32Array(size * size), cA = [0, 0, 0], cB = [0, 0, 0];
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const k = y * size + x, u = x / size, v = y / size;
+    const patch = smoothstep(0.4, 0.6, 0.5 + 0.5 * pfbm(u, v, 3, 3, 11));              // where the cobbles give way to finer gravel
+    const domeA = Math.sqrt(Math.max(0, 1 - (A.f1[k] * 8 / 0.86) ** 2));
+    const domeB = Math.sqrt(Math.max(0, 1 - (B.f1[k] * 19 / 0.9) ** 2));
+    const h = Math.max(domeA * (1 - patch * 0.85), domeB) * (0.85 + 0.3 * (0.5 + 0.5 * pfbm(u, v, 4, 24, 5)));
+    hgt[k] = h;
+    stoneColor(A.id[k], 301, cA); stoneColor(B.id[k], 302, cB);
+    for (let c = 0; c < 3; c++) alb[k * 4 + c] = 255 * clamp(lerp(cB[c], cA[c], domeA * (1 - patch * 0.85) > domeB ? 1 : 0) * (0.68 + 0.32 * h), 0, 1);
+    alb[k * 4 + 3] = 255;
+  }
+  return { albedo: dataTexture(alb, size, size, { srgb: true }), normal: dataTexture(heightToNormal(hgt, size, size, 2.4), size, size) };
+}
+
+function makeRockMaps(size = 512) {
+  const alb = new Uint8Array(size * size * 4), hgt = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const k = y * size + x, u = x / size, v = y / size;
+    const base = pfbm(u, v, 5, 4, 21), fine = pfbm(u, v, 4, 24, 22), speck = hash2i(x, y, 24) - 0.5;
+    const crack = smoothstep(0.012, 0, Math.abs(pfbm(u, v + 0.13, 3, 5, 23)));          // a few hairline cracks
+    hgt[k] = base * 0.5 + fine * 0.5 - crack * 0.25 + speck * 0.12;
+    const l = clamp(0.36 + 0.09 * base + 0.07 * fine - 0.1 * crack + speck * 0.08, 0, 1), o = k * 4;
+    alb[o] = 255 * l * 0.95;
+  }
+  return { albedo: dataTexture(alb, size, size, { srgb: true }), normal: dataTexture(heightToNormal(hgt, size, size, 5), size, size) };
+}
+
+function makeBarkMaps(w = 256, h = 512) {
+  const W = worley(w, h, 7, 15, 404);
+  const alb = new Uint8Array(w * h * 4), hgt = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = y * w + x, u = x / w, v = y / h;
+    const plate = smoothstep(0, 0.2, (W.f2[k] - W.f1[k]) * 7);                         // 0 in a crevice, 1 on a plate
+    const l = 0.24 + 0.12 * hash2i(W.id[k], 405, 1);
+    hgt[k] = plate * 0.8 + 0.2 * (0.5 + 0.5 * pfbm(u, v, 4, 16, 41));
+    const o = k * 4;
+    const grain = 0.85 + 0.3 * (0.5 + 0.5 * pfbm(u, v, 4, 32, 43));
+    alb[o] = 255 * lerp(0.15, l * grain, plate); alb[o + 1] = 255 * lerp(0.125, l * 0.9 * grain, plate); alb[o + 2] = 255 * lerp(0.105, l * 0.8 * grain, plate); alb[o + 3] = 255;
+  }
+  return { albedo: dataTexture(alb, w, h, { srgb: true }), normal: dataTexture(heightToNormal(hgt, w, h, 6), w, h) };
+}
+
+// Forest floor: moss and soil, strewn with fallen pine needles.
+function makeFloorMaps(size = 512) {
+  const c = makeCanvas(size), g = c.getContext('2d', { willReadFrequently: true }), img = g.createImageData(size, size), hgt = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const k = y * size + x, u = x / size, v = y / size;
+    const m = pfbm(u, v, 4, 5, 51), d = pfbm(u, v, 3, 13, 52), t = smoothstep(-0.25, 0.3, m), lum = 0.75 + 0.5 * (0.5 + 0.5 * d), o = k * 4;
+    hgt[k] = d * 0.6 + m * 0.4;
+    img.data[o] = 255 * lerp(0.20, 0.115, t) * lum; img.data[o + 1] = 255 * lerp(0.155, 0.165, t) * lum; img.data[o + 2] = 255 * lerp(0.105, 0.085, t) * lum; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const rng = mulberry32(53), needles = ['#5a3f22', '#6e4d26', '#7c5a2b', '#43301c', '#3c4a26'];
+  g.lineCap = 'round';
+  for (let i = 0; i < 2400; i++) {
+    const x = rng() * size, y = rng() * size, a = rng() * TAU, len = 9 + rng() * 9, bend = (rng() - 0.5) * 4;
+    g.strokeStyle = needles[(rng() * needles.length) | 0]; g.globalAlpha = 0.5 + rng() * 0.45; g.lineWidth = 1 + rng() * 0.6;
+    for (const [ox, oy] of [[0, 0], [size, 0], [0, size], [size, size]]) {               // repeat near the edges to keep the tile seamless
+      if (ox && x > 24) continue; if (oy && y > 24) continue;
+      g.beginPath(); g.moveTo(x + ox, y + oy);
+      g.quadraticCurveTo(x + ox + Math.cos(a) * len * 0.5 - Math.sin(a) * bend, y + oy + Math.sin(a) * len * 0.5 + Math.cos(a) * bend, x + ox + Math.cos(a) * len, y + oy + Math.sin(a) * len);
+      g.stroke();
+    }
+  }
+  return { albedo: texFromCanvas(c), normal: dataTexture(heightToNormal(hgt, size, size, 3), size, size) };
+}
+
+// One pine spray: twigs radiating from the centre, each ending in a round brush of needles, which is
+// what the bundles at the end of a pine shoot look like. Drawn large so the needles stay fine up close.
+function makeNeedleTexture(size = 1024) {
+  const c = makeCanvas(size), g = c.getContext('2d', { willReadFrequently: true }), rng = mulberry32(7), mid = size / 2;
+  g.lineCap = 'round';
+  const tips = [];
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * TAU + (rng() - 0.5) * 0.7, r = size * (0.15 + rng() * 0.06);
+    tips.push([mid + Math.cos(a) * r, mid + Math.sin(a) * r]);
+  }
+  g.strokeStyle = '#3a2a1c'; g.lineWidth = size * 0.006;
+  for (const [x, y] of tips) { g.beginPath(); g.moveTo(mid, mid); g.lineTo(x, y); g.stroke(); }
+  const needle = (x, y, a, len) => {
+    const bend = (rng() - 0.5) * len * 0.25;
+    const ex = x + Math.cos(a) * len, ey = y + Math.sin(a) * len, mx = (x + ex) / 2 - Math.sin(a) * bend, my = (y + ey) / 2 + Math.cos(a) * bend;
+    const dead = rng() < 0.06;                                 // a few of last year's needles have turned brown
+    g.strokeStyle = `hsl(${dead ? 28 + rng() * 10 : 146 + rng() * 18} ${dead ? 38 : 28 + rng() * 16}% ${dead ? 24 : 17 + rng() * 14}%)`;
+    g.lineWidth = size * 0.0024;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(mx, my, ex, ey); g.stroke();
+  };
+  for (const [x, y] of tips) for (let i = 0; i < 120; i++) needle(x, y, rng() * TAU, size * (0.085 + rng() * 0.07));
+  for (let i = 0; i < 70; i++) needle(mid, mid, rng() * TAU, size * (0.05 + rng() * 0.05));
+  return texFromCanvas(c, { keepAlpha: true });
+}
+
+function makeGrassTexture(size = 256) {
+  const c = makeCanvas(size), g = c.getContext('2d', { willReadFrequently: true }), rng = mulberry32(17);
+  for (let i = 0; i < 34; i++) {
+    const bx = size * (0.5 + (rng() - 0.5) * 0.5), h = size * (0.5 + rng() * 0.48), lean = (rng() - 0.5) * 0.9, w = 3 + rng() * 4;
+    const tipX = bx + lean * h, tipY = size - h, cx = bx + lean * h * 0.25, cy = size - h * 0.6;
+    const hue = 92 + rng() * 34, light = 15 + rng() * 13;
+    const grad = g.createLinearGradient(0, size, 0, tipY);
+    grad.addColorStop(0, `hsl(${hue} 34% ${light * 0.55}%)`); grad.addColorStop(1, `hsl(${hue} 36% ${light * 1.5}%)`);
+    g.fillStyle = grad;
+    g.beginPath(); g.moveTo(bx - w / 2, size);
+    g.quadraticCurveTo(cx - w * 0.35, cy, tipX, tipY);
+    g.quadraticCurveTo(cx + w * 0.35, cy, bx + w / 2, size);
+    g.closePath(); g.fill();
+  }
+  return texFromCanvas(c, { flip: true, keepAlpha: true });
+}
+
+function makeFernTexture(size = 256) {
+  const c = makeCanvas(size), g = c.getContext('2d', { willReadFrequently: true }), rng = mulberry32(23), bx = size / 2, by = size;
+  g.lineCap = 'round';
+  for (let f = 0; f < 7; f++) {
+    const a = -Math.PI / 2 + (f / 6 - 0.5) * 2.5 + (rng() - 0.5) * 0.15, len = size * (0.44 + rng() * 0.17);
+    const hue = 118 + rng() * 18, sat = 32 + rng() * 10, light = 15 + rng() * 9;
+    const ex = bx + Math.cos(a) * len, ey = by + Math.sin(a) * len, curve = (rng() - 0.5) * 0.5;
+    const at = (t) => { const q = 2 * (1 - t) * t; return [bx * t * t + (bx + Math.cos(a + curve) * len * 0.5) * q + ex * t * t, by * t * t + (by + Math.sin(a + curve) * len * 0.5) * q + ey * t * t]; };
+    g.strokeStyle = `hsl(${hue} ${sat}% ${light * 0.8}%)`; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + Math.cos(a + curve) * len * 0.5, by + Math.sin(a + curve) * len * 0.5, ex, ey); g.stroke();
+    g.fillStyle = `hsl(${hue} ${sat}% ${light + 6}%)`;
+    for (let i = 0; i < 15; i++) {
+      const t = 0.14 + 0.84 * i / 15, [px, py] = at(t), pl = len * 0.2 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.12)), 0.8);
+      for (const side of [-1, 1]) {
+        const pa = a + side * 1.0, lx = px + Math.cos(pa) * pl, ly = py + Math.sin(pa) * pl;
+        g.beginPath(); g.moveTo(px, py);
+        g.quadraticCurveTo((px + lx) / 2 - Math.sin(pa) * pl * 0.3, (py + ly) / 2 + Math.cos(pa) * pl * 0.3, lx, ly);
+        g.quadraticCurveTo((px + lx) / 2 + Math.sin(pa) * pl * 0.22, (py + ly) / 2 - Math.cos(pa) * pl * 0.22, px, py);
+        g.fill();
+      }
+    }
+  }
+  return texFromCanvas(c, { flip: true, keepAlpha: true });
+}
+
+function makeLeafTexture(size = 128) {
+  const c = makeCanvas(size), g = c.getContext('2d', { willReadFrequently: true });
+  const grad = g.createLinearGradient(0, size, size, 0);
+  grad.addColorStop(0, '#7a4a18'); grad.addColorStop(1, '#c98a2e');
+  g.fillStyle = grad;
+  g.beginPath(); g.moveTo(10, size - 10);
+  g.bezierCurveTo(size * 0.35, size * 0.05, size * 0.8, size * 0.05, size - 8, 8);
+  g.bezierCurveTo(size * 0.95, size * 0.5, size * 0.6, size * 0.9, 10, size - 10);
+  g.fill();
+  g.strokeStyle = 'rgba(70,38,10,0.75)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(12, size - 12); g.lineTo(size - 12, 12); g.stroke();
+  return texFromCanvas(c, { keepAlpha: true });
+}
+
+function makeMoonTexture(size = 512) {
+  const c = makeCanvas(size), g = c.getContext('2d', { willReadFrequently: true }), r = size / 2, rng = mulberry32(3);
+  const disc = g.createRadialGradient(r, r, 0, r, r, r);
+  disc.addColorStop(0, '#fff9ec'); disc.addColorStop(0.7, '#fbf1d8'); disc.addColorStop(0.93, '#e6d9bd'); disc.addColorStop(1, 'rgba(226,214,186,0)');
+  g.fillStyle = disc; g.beginPath(); g.arc(r, r, r, 0, TAU); g.fill();
+  g.globalCompositeOperation = 'source-atop';
+  for (let i = 0; i < 9; i++) {                                   // maria
+    const a = rng() * TAU, d = rng() * r * 0.62, rad = r * (0.12 + rng() * 0.2), x = r + Math.cos(a) * d, y = r + Math.sin(a) * d;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, 'rgba(150,146,150,0.36)'); gr.addColorStop(1, 'rgba(150,146,150,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, size, size);
+  }
+  for (let i = 0; i < 34; i++) {                                  // craters: a shaded bowl with a pale rim
+    const a = rng() * TAU, d = rng() * r * 0.8, rad = r * (0.008 + rng() * 0.028), x = r + Math.cos(a) * d, y = r + Math.sin(a) * d;
+    g.fillStyle = 'rgba(255,250,235,0.22)'; g.beginPath(); g.arc(x - rad * 0.12, y - rad * 0.12, rad, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(120,114,110,0.2)'; g.beginPath(); g.arc(x + rad * 0.16, y + rad * 0.16, rad * 0.82, 0, TAU); g.fill();
+  }
+  const img = g.getImageData(0, 0, size, size), d = img.data;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const k = (y * size + x) * 4;
+    if (!d[k + 3]) continue;
+    const n = 0.93 + 0.14 * (0.5 + 0.5 * pfbm(x / size, y / size, 4, 24, 61));
+    d[k] *= n; d[k + 1] *= n; d[k + 2] *= n;
+  }
+  g.putImageData(img, 0, 0);
+  return texFromCanvas(c);
+}
+
+function makeRadialTexture(size = 128, mist = false) {
+  const out = new Uint8Array(size * size * 4), rng = mulberry32(mist ? 71 : 72);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const u = (x + 0.5) / size, v = (y + 0.5) / size, dx = u - 0.5, dy = v - 0.5, r = Math.hypot(dx, dy) * 2;
+    const fall = Math.pow(Math.max(0, 1 - r * r), mist ? 1.5 : 2.2);
+    const n = mist ? 0.55 + 0.45 * (0.5 + 0.5 * pfbm(u, v, 3, 4, 73)) : 1;
+    const k = (y * size + x) * 4, a = clamp(fall * n, 0, 1);
+    out[k] = out[k + 1] = out[k + 2] = 255; out[k + 3] = a * 255;
+  }
+  return dataTexture(out, size, size, { repeat: false });
+}
+
+const glsl = (x) => (Number.isInteger(x) ? x.toFixed(1) : x.toString());   // JS number -> GLSL float literal
+
+const stage = async (label, pct, fn) => {
+  $('loading-status').textContent = label;
+  $('loading-bar').style.width = pct + '%';
+  await nextFrame(); await nextFrame();        // let the label paint before the synchronous work begins
+  return fn();
+};
+
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.toneMapping = THREE.NoToneMapping;    // the scene stays linear HDR in its render target; section 9 tone-maps
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, 1, 0.15, 2600);
+const UP = new THREE.Vector3(0, 1, 0);
+const NIGHT = {
+  zenith: new THREE.Color(0x040815), horizon: new THREE.Color(0x16233f),
+  moon: new THREE.Color(0xfff0cf), moonLight: new THREE.Color(0xb9ccff),
+  fog: new THREE.Color(0x1f2c48), skyBounce: new THREE.Color(0x22335c), groundBounce: new THREE.Color(0x0a0c10),
+};
+
+const tex = await stage('正在研墨', 14, () => ({
+  water: makeWaterNormal(), noise: makeNoise(), stone: makeStoneMaps(), rock: makeRockMaps(), bark: makeBarkMaps(),
+  floor: makeFloorMaps(), needle: makeNeedleTexture(), grass: makeGrassTexture(), fern: makeFernTexture(),
+  leaf: makeLeafTexture(), moon: makeMoonTexture(), glow: makeRadialTexture(128), mist: makeRadialTexture(256, true),
+}));
+
+// ---------------------------------------------------------------- 2. the valley
+// The stream runs from upstream (-z) to downstream (+z). `streamX` is its centre line and `s` the
+// lateral offset from it, so the whole valley is laid out in stream coordinates (s, z).
+const Z_UP = -104, Z_DOWN = 44;
+const MEANDER = [[2.6, 0.062, 0.4], [1.9, 0.031, 2.9], [0.5, 0.19, 1.1]];          // [amplitude, frequency, phase]
+const X0 = MEANDER.reduce((sum, [a, , p]) => sum + a * Math.sin(p), 0);              // puts the centre line through x = 0 at z = 0
+const streamX = (z) => MEANDER.reduce((sum, [a, f, p]) => sum + a * Math.sin(z * f + p), 0) - X0;
+const halfWidth = (z) => 2.3 + 0.6 * Math.sin(z * 0.093 + 1.3) + 0.25 * Math.sin(z * 0.21 + 0.2);
+// Shallow, stony stretches [centre z, half length]; the water is deeper in between.
+const RIFFLES = [[16, 5], [-6.5, 3.6], [-17.5, 4.2], [-31, 4], [-47, 5], [-64, 4.5], [-82, 5]];
+const riffle = (z) => RIFFLES.reduce((m, [c, w]) => Math.max(m, Math.exp(-(((z - c) / w) ** 2))), 0);
+const bedDepth = (z) => 0.36 - 0.26 * riffle(z) + 0.02 * Math.sin(z * 0.9);
+// The same line in GLSL, so the water can find its own flow direction.
+const streamGLSL = `
+float streamX(float z) { return ${MEANDER.map(([a, f, p]) => `${glsl(a)} * sin(z * ${glsl(f)} + ${glsl(p)})`).join(' + ')} - ${glsl(X0)}; }
+float streamDX(float z) { return ${MEANDER.map(([a, f, p]) => `${glsl(a * f)} * cos(z * ${glsl(f)} + ${glsl(p)})`).join(' + ')}; }
+`;
+
+// Stones in the stream are rounded domes in the bed: their top sits at `top` (the water is at 0) and
+// their widest point below the deepest bed, so the part above water has steep, boulder-like sides.
+const rngStones = mulberry32(21);
+const stoneBuckets = new Map();                 // z-bucketed, so a lookup only touches the stones that can reach it
+const BUCKET = 2;
+function addStone(s, z, a, b, top, rot = rngStones() * Math.PI) {
+  const st = { x: streamX(z) + s, z, a, b, top, c: Math.cos(rot), n: Math.sin(rot), seed: (rngStones() * 4096) | 0 };
+  const reach = Math.max(a, b) + 0.4;
+  for (let i = Math.floor((z - reach) / BUCKET); i <= Math.floor((z + reach) / BUCKET); i++) {
+    if (!stoneBuckets.has(i)) stoneBuckets.set(i, []);
+    stoneBuckets.get(i).push(st);
+  }
+}
+// The ones in front of the camera are placed by hand: a cluster in the moon's path.
+[[0.5, -3.4, 0.62, 0.5, 0.24], [-0.65, -4.3, 0.38, 0.32, 0.13], [1.65, -4.6, 0.44, 0.38, 0.16],
+ [-1.9, -2.0, 0.32, 0.28, 0.07], [2.4, -1.2, 0.55, 0.46, 0.22], [-2.6, -6.6, 0.5, 0.42, 0.2],
+ [-0.3, 4.0, 0.5, 0.4, 0.05], [1.9, 2.8, 0.3, 0.26, 0.03], [-2.2, 1.2, 0.36, 0.3, 0.04]].forEach(([s, z, a, b, top]) => addStone(s, z, a, b, top));
+for (let z = Z_UP + 1; z < Z_DOWN - 1; z += 0.32 + rngStones() * 0.7) {
+  const w = halfWidth(z), r = riffle(z);
+  if (rngStones() < 0.25 + 0.6 * r) {
+    // riffle stones: crowded where the water is shallow, and there about a third break the surface
+    const a = 0.16 + rngStones() * (0.22 + 0.3 * r);
+    const top = r > 0.5 ? -0.06 + rngStones() * 0.17 : -0.16 + rngStones() * 0.1;
+    addStone((rngStones() * 2 - 1) * (w + 0.5), z + (rngStones() - 0.5) * 0.4, a, a * (0.8 + rngStones() * 0.7), top);
+  }
+  if (rngStones() < 0.1) {
+    // a larger boulder at the water's edge
+    const a = 0.4 + rngStones() * 0.5;
+    addStone((rngStones() < 0.5 ? -1 : 1) * (w - 0.2 - rngStones() * 0.8), z, a, a * (0.85 + rngStones() * 0.4), 0.08 + rngStones() * 0.24);
+  }
+}
+
+const SIDE = { left: { slope: 0.3, off: 37.2, seed: 3 }, right: { slope: 0.22, off: 91.7, seed: 8 } };
+const info = { h: 0, stone: 0 };
+function groundInfo(x, z, out) {
+  const cx = streamX(z), w = halfWidth(z), d = Math.abs(x - cx);
+  let h;
+  if (d < w) {
+    h = -bedDepth(z) * Math.pow(1 - (d / w) ** 2, 0.8);                                  // the channel
+  } else {
+    const e = d - w, side = x < cx ? SIDE.left : SIDE.right;
+    const big = fbm2(x * 0.028 + side.off, z * 0.028, 4, side.seed);
+    h = 0.75 * (1 - Math.exp(-e / 1.1))                                                 // a low gravel bank,
+      + side.slope * Math.pow(Math.max(0, e - 1.6), 1.15) * (1 + 0.5 * big)              // then the valley side rising steeply
+      + big * 9 * smoothstep(4, 22, e);
+  }
+  const up = smoothstep(0.5, 2.5, h);
+  h += fbm2(x * 1.9, z * 1.9, 3, 5) * (0.02 + 0.03 * up);                                // gravel and hummocks
+  h += fbm2(x * 0.42, z * 0.31, 3, 9) * (0.05 + 0.14 * up);
+
+  let dome = -Infinity;
+  const list = stoneBuckets.get(Math.floor(z / BUCKET));
+  if (list) for (const st of list) {
+    const dx = x - st.x, dz = z - st.z;
+    const u = (dx * st.c + dz * st.n) / st.a, v = (-dx * st.n + dz * st.c) / st.b;
+    let q2 = u * u + v * v;
+    if (q2 < 1.35) {
+      q2 *= 1 + 0.22 * noise2(x * 2.3 + st.seed, z * 2.3, 31);                            // a lumpy outline
+      if (q2 < 1) {
+        const R = 0.36 + st.top;
+        const y = -0.36 + R * Math.sqrt(1 - q2) + 0.022 * noise2(x * 5.1 + st.seed, z * 5.1, 47) * (1 - q2);
+        if (y > dome) dome = y;
+      }
+    }
+  }
+  if (dome > -Infinity) {
+    out.stone = 1 / (1 + Math.exp(-18 * (dome - h)));
+    h = smax(h, dome, 18);
+  } else out.stone = 0;
+  out.h = h;
+}
+
+// A dense grid of bed heights near the water. The terrain reads it, and the water reads the same
+// numbers back as a texture, so what the surface knows about the bed is exactly what is drawn.
+const S_BED = 5, NX = 101, NZ = 987, DX = 0.1, DZ = 0.15;
+const bedH = new Float32Array(NX * NZ), bedStone = new Float32Array(NX * NZ);
+await stage('正在叠石', 30, () => {
+  for (let j = 0; j < NZ; j++) {
+    const z = Z_UP + j * DZ, cx = streamX(z);
+    for (let i = 0; i < NX; i++) {
+      groundInfo(cx - S_BED + i * DX, z, info);
+      bedH[j * NX + i] = info.h; bedStone[j * NX + i] = info.stone;
+    }
+  }
+});
+function bedSample(grid, s, z) {
+  const fx = clamp((s + S_BED) / DX, 0, NX - 1.001), fz = clamp((z - Z_UP) / DZ, 0, NZ - 1.001);
+  const i = fx | 0, j = fz | 0, tx = fx - i, tz = fz - j, k = j * NX + i;
+  return lerp(lerp(grid[k], grid[k + 1], tx), lerp(grid[k + NX], grid[k + NX + 1], tx), tz);
+}
+const bedAt = (s, z) => bedSample(bedH, s, z);
+function heightAt(x, z) {
+  const s = x - streamX(z);
+  if (Math.abs(s) <= S_BED - 0.15 && z > Z_UP + 0.3 && z < Z_DOWN - 0.3) return bedAt(s, z);
+  groundInfo(x, z, info);
+  return info.h;
+}
+
+// ---------------------------------------------------------------- 3. sky
+// The moon hangs low over the upstream gap between the pines, a little to the left of the view.
+const MOON_AZ = -9 * DEG, MOON_EL = 15 * DEG;
+const MOON_RADIUS = 2.3 * DEG;                   // about nine times the real moon: the size it is painted
+const moonDir = new THREE.Vector3(Math.sin(MOON_AZ) * Math.cos(MOON_EL), Math.sin(MOON_EL), -Math.cos(MOON_AZ) * Math.cos(MOON_EL));
+const moonTan = Math.tan(MOON_RADIUS);
+
+const skyUniforms = {
+  uMoonDir: { value: moonDir }, uTime: { value: 0 }, tMoon: { value: tex.moon }, tNoise: { value: tex.noise },
+  uZenith: { value: NIGHT.zenith }, uHorizon: { value: NIGHT.horizon }, uMoonColor: { value: NIGHT.moon }, uGlow: { value: new THREE.Color(0.7, 0.8, 1.0) },
+};
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(1800, 64, 32),
+  new THREE.ShaderMaterial({
+    uniforms: skyUniforms, side: THREE.BackSide, depthWrite: false, fog: false,
+    vertexShader: /* glsl */`
+      varying vec3 vDir;
+      void main() {
+        vDir = (modelMatrix * vec4(position, 1.0)).xyz - cameraPosition;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      uniform vec3 uMoonDir, uZenith, uHorizon, uMoonColor, uGlow;
+      uniform float uTime;
+      uniform sampler2D tMoon;
+      uniform sampler2D tNoise;
+      varying vec3 vDir;
+      float hash21(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+      void main() {
+        vec3 d = normalize(vDir);
+        float h = d.y;
+        vec3 col = mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.5));
+        col = mix(col * 0.55, col, smoothstep(-0.1, 0.03, h));
+
+        // The moon: a disc projected on the plane tangent to the sky, under three halos of different widths.
+        vec3 up = abs(uMoonDir.y) > 0.98 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+        vec3 T = normalize(cross(up, uMoonDir)), B = cross(uMoonDir, T);
+        float cosA = dot(d, uMoonDir);
+        vec2 p = vec2(dot(d, T), dot(d, B)) / max(cosA, 0.02);
+        float x = length(p);                                                     // tan of the angle from the moon
+        float r = x / ${glsl(moonTan)};
+        float edge = 1.5 * fwidth(r);
+        float disc = 1.0 - smoothstep(1.0 - edge, 1.0 + edge, r);
+        col += uGlow * (0.2 * exp(-x * 5.0) + 0.1 * exp(-x * 1.6) + 0.034 * exp(-x * 0.55));
+
+        // Wisps of high cloud, silvered where they pass near the moon.
+        vec2 q = d.xz / (d.y + 0.14);
+        float c1 = texture2D(tNoise, q * vec2(0.035, 0.11) + vec2(uTime * 0.0021, 0.0)).b;
+        float c2 = texture2D(tNoise, q * vec2(0.09, 0.26) + vec2(uTime * 0.0034, 0.37)).g;
+        float cloud = smoothstep(0.52, 0.86, c1 * 0.65 + c2 * 0.45) * smoothstep(0.02, 0.22, h);
+        vec3 cloudCol = mix(uHorizon * 0.9, uGlow * 0.6, pow(max(cosA, 0.0), 18.0));
+        col = mix(col, cloudCol, cloud * 0.75);
+        col = mix(col, texture2D(tMoon, p / (2.0 * ${glsl(moonTan)}) + 0.5).rgb * 5.0, disc);
+
+        // Stars: one per cell of a stereographic grid, a few bright enough to bloom.
+        vec2 sp = d.xz / (1.0 + h) * 110.0;
+        vec2 cell = floor(sp), f = fract(sp) - 0.5;
+        float rnd = hash21(cell);
+        vec2 off = vec2(hash21(cell + 7.1), hash21(cell + 3.7)) - 0.5;
+        float star = smoothstep(0.13, 0.0, length(f - off * 0.7)) * step(0.74, rnd);
+        float twinkle = 0.75 + 0.25 * sin(uTime * (1.0 + rnd * 3.0) + rnd * 40.0);
+        float magnitude = pow(max(rnd - 0.74, 0.0) / 0.26, 3.0);
+        col += vec3(0.85, 0.9, 1.0) * star * twinkle * smoothstep(0.03, 0.3, h) * (1.0 - cloud)
+             * (1.0 - smoothstep(0.3, 0.9, x)) * (0.3 + 4.0 * magnitude);
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  }),
+);
+sky.renderOrder = -10;
+sky.frustumCulled = false;
+scene.add(sky);
+
+// Ridges closing the valley, each a silhouette that dissolves into the mist at its foot.
+const ridgeMat = (color) => new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: color }, uMist: { value: NIGHT.fog } },
+  vertexShader: /* glsl */`
+    attribute float aT; varying float vT;
+    void main() { vT = aT; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform vec3 uColor, uMist; varying float vT;
+    void main() { gl_FragColor = vec4(mix(uMist, uColor, smoothstep(0.0, 0.72, vT)), 1.0); }`,
+  depthWrite: false, fog: false,
+});
+await stage('正在远眺', 38, () => {
+  const SEG = 480;
+  for (const layer of [
+    { r: 1500, base: 0.105, amp: 0.085, freq: 2.6, color: new THREE.Color(0x2a3a60), seed: 5 },
+    { r: 1150, base: 0.08, amp: 0.06, freq: 3.4, color: new THREE.Color(0x1d2b48), seed: 9 },
+    { r: 850, base: 0.055, amp: 0.04, freq: 4.6, color: new THREE.Color(0x131d33), seed: 13 },
+  ]) {
+    const pos = new Float32Array((SEG + 1) * 6), t = new Float32Array((SEG + 1) * 2), idx = new Uint32Array(SEG * 6);
+    for (let i = 0; i <= SEG; i++) {
+      const a = (i / SEG) * TAU, ca = Math.cos(a), sa = Math.sin(a);
+      const f = 0.65 * (1 - Math.abs(noise2(ca * layer.freq + 40, sa * layer.freq + 40, layer.seed)))
+              + 0.35 * (1 - Math.abs(noise2(ca * layer.freq * 2.7 + 13, sa * layer.freq * 2.7 + 13, layer.seed + 1)));
+      const rel = Math.atan2(Math.sin(a - MOON_AZ), Math.cos(a - MOON_AZ));           // signed angle to the moon's bearing
+      const notch = 1 - 0.45 * Math.exp(-((rel / 0.38) ** 2));                           // lower under the moon
+      const top = layer.r * (layer.base + layer.amp * f) * notch;
+      pos.set([layer.r * sa, top, -layer.r * ca, layer.r * sa, -layer.r * 0.12, -layer.r * ca], i * 6);
+      t[i * 2] = 1; t[i * 2 + 1] = 0;
+      if (i < SEG) idx.set([i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2], i * 6);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aT', new THREE.BufferAttribute(t, 1));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    const mesh = new THREE.Mesh(geo, ridgeMat(layer.color));
+    mesh.renderOrder = -9;
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  }
+});
+
+// ---------------------------------------------------------------- 4. terrain
+// One mesh for bed, banks and valley sides, on a grid that is fine (10–12 cm) along the stream and
+// grows to several metres far up the slopes. Each vertex carries what it is made of: gravel,
+// stone, wetness and moss, and the shader blends the maps from those.
+let terrain;
+await stage('正在铺陈山谷', 48, () => {
+  const cols = [];
+  for (let i = 0; i <= (2 * S_BED) / DX; i++) cols.push(-S_BED + i * DX);
+  for (const [a, b, step] of [[S_BED, 12, 0.4], [12, 24, 1.2], [24, 44, 3], [44, 76, 6], [76, 110, 10]]) {
+    for (let s = a + step; s <= b + 1e-6; s += step) cols.push(s, -s);
+  }
+  cols.sort((a, b) => a - b);
+  const rows = [Z_UP];
+  for (let z = Z_UP, st = 1.2; z < -46 - 1e-6;) { st = Math.max(0.1, st * 0.981); z = Math.min(z + st, -46); rows.push(z); }
+  for (let i = 1; i <= 634; i++) rows.push(-46 + i * 0.12);                  // the near field, from 46 m upstream to 30 m down
+  for (let z = -46 + 634 * 0.12, st = 0.12; z < Z_DOWN - 1e-6;) { st = Math.min(1.5, st * 1.1); z = Math.min(z + st, Z_DOWN); rows.push(z); }
+
+  const nc = cols.length, nr = rows.length, nv = nc * nr;
+  const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), surf = new Float32Array(nv * 4), idx = new Uint32Array((nr - 1) * (nc - 1) * 6);
+  let v = 0;
+  for (let j = 0; j < nr; j++) {
+    const z = rows[j], cx = streamX(z);
+    for (let i = 0; i < nc; i++, v++) {
+      const s = cols[i], x = cx + s, inBed = Math.abs(s) <= S_BED + 1e-6;
+      const h = inBed ? bedAt(s, z) : (groundInfo(x, z, info), info.h);
+      const stone = inBed ? bedSample(bedStone, s, z) : info.stone;
+      pos[v * 3] = x; pos[v * 3 + 1] = h; pos[v * 3 + 2] = z;
+      uv[v * 2] = x; uv[v * 2 + 1] = z;
+      surf[v * 4] = clamp(Math.max(stone, smoothstep(0.55, 0.15, h + 0.22 * noise2(x * 0.6, z * 0.6, 77))), 0, 1);   // gravel near the water
+      surf[v * 4 + 1] = stone;
+      surf[v * 4 + 2] = 0.45 + 0.55 * smoothstep(0.9, 0.05, h);                                                      // wet: it has just rained
+    }
+  }
+  let q = 0;
+  for (let j = 0; j < nr - 1; j++) for (let i = 0; i < nc - 1; i++) {
+    const a = j * nc + i, b = a + nc;
+    idx[q++] = a; idx[q++] = b; idx[q++] = a + 1; idx[q++] = b; idx[q++] = b + 1; idx[q++] = a + 1;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setAttribute('aSurf', new THREE.BufferAttribute(surf, 4));
+  geo.setAttribute('aHeight', new THREE.Float32BufferAttribute(pos.filter((_, i) => i % 3 === 1), 1));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  const nrm = geo.attributes.normal.array;
+  for (let k = 0; k < nv; k++) {
+    const open = 1 - nrm[k * 3 + 1];
+    surf[k * 4 + 1] = clamp(surf[k * 4 + 1] + smoothstep(0.22, 0.5, open), 0, 1);                 // bare rock where it is steep
+    surf[k * 4 + 3] = smoothstep(0.35, 1.1, pos[k * 3 + 1]) * (1 - smoothstep(0.15, 0.4, open)) * (1 - surf[k * 4]);
+  }
+  geo.attributes.aSurf.needsUpdate = true;
+
+  const mat = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, normalMap: tex.stone.normal, envMapIntensity: 0.6 });
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, {
+      tPebble: { value: tex.stone.albedo }, tFloor: { value: tex.floor.albedo }, tFloorN: { value: tex.floor.normal },
+      tRock: { value: tex.rock.albedo }, tRockN: { value: tex.rock.normal }, tNoise: { value: tex.noise },
+    });
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute vec4 aSurf; attribute float aHeight; varying vec4 vSurf; varying float vHeight; varying vec2 vTex; varying vec3 vWNrm;`)
+      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
+        vSurf = aSurf; vHeight = aHeight; vTex = uv; vWNrm = normalize(mat3(modelMatrix) * objectNormal);`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D tPebble; uniform sampler2D tFloor; uniform sampler2D tFloorN;
+        uniform sampler2D tRock; uniform sampler2D tRockN; uniform sampler2D tNoise;
+        varying vec4 vSurf; varying float vHeight; varying vec2 vTex; varying vec3 vWNrm;`)
+      .replace('#include <map_fragment>', `
+        vec2 wp = vTex;                                                            // maps are projected from above, in metres
+        float rockW = clamp(vSurf.y + smoothstep(0.22, 0.5, 1.0 - vWNrm.y), 0.0, 1.0);
+        vec3 alb = mix(texture2D(tFloor, wp * 0.11).rgb, texture2D(tPebble, wp * 0.8).rgb, vSurf.x);
+        alb = mix(alb, texture2D(tRock, wp * 0.8).rgb, rockW);
+        alb = mix(alb, alb * vec3(0.78, 1.0, 0.66), vSurf.w * (0.55 + 0.45 * texture2D(tNoise, wp * 0.35).g));
+        float patches = texture2D(tNoise, wp * 0.3).a;                                // damp and drier stretches, a few metres across
+        diffuseColor.rgb *= alb * (0.7 + 0.6 * texture2D(tNoise, wp * 0.045).r) * (0.8 + 0.4 * patches)
+                         * (1.0 - 0.7 * vSurf.z * (1.0 - smoothstep(0.1, 0.7, vHeight)));`)
+      .replace('#include <roughnessmap_fragment>', `
+        float roughnessFactor = mix(mix(0.95, 0.7, rockW), 0.6, vSurf.z);`)
+      .replace('#include <lights_physical_fragment>', rewriteChunk('lights_physical_fragment', 'material.specularF90 = 1.0;', 'material.specularF90 = mix(mix(0.2, 0.34, vSurf.z), 0.08, 1.0 - smoothstep(-0.03, 0.03, vHeight));'))
+      // Under water the bed is lit through the surface, by a narrowed cone of moonlight and less sky.
+      .replace('#include <opaque_fragment>', `
+        outgoingLight *= 1.0 - 0.55 * ( 1.0 - smoothstep( -0.03, 0.03, vHeight ) );
+        #include <opaque_fragment>`)
+      .replace('#include <normal_fragment_maps>', `
+        {
+          vec2 nb = texture2D(tPebble, wp * 0.8).xy * 2.0 - 1.0;
+          vec2 nr = texture2D(tRockN, wp * 0.8).xy * 2.0 - 1.0;
+          vec2 nf = texture2D(tFloorN, wp * 0.11).xy * 2.0 - 1.0;
+          vec2 nxy = nb * vSurf.x * 0.45 + nr * rockW + nf * (1.0 - vSurf.x) * (1.0 - rockW) * 0.5;
+          normal = normalize(tbn * normalize(vec3(nxy, 1.0)));
+        }`);
+  };
+  terrain = new THREE.Mesh(geo, mat);
+  terrain.receiveShadow = true;
+  terrain.castShadow = true;                       // the valley sides shade themselves
+  scene.add(terrain);
+});
+
+// ---------------------------------------------------------------- 5. water
+// A flat sheet along the channel. The shader looks the bed up in the height texture, bends a copy of
+// the opaque scene through the surface, mirrors the sky and pines from a cubemap, and lays foam
+// wherever the water is thin: at every stone, bank and riffle.
+const fx = [];                                    // transparent things the opaque passes must not draw
+const waterUniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.lights, THREE.UniformsLib.fog, {
+  uTime: { value: 0 }, uResolution: { value: new THREE.Vector2(1, 1) },
+  tBed: { value: null }, tNormal: { value: tex.water }, tNoise: { value: tex.noise }, tEnv: { value: null }, tRefract: { value: null },
+  uBedParam: { value: new THREE.Vector4(1 / (2 * S_BED), 1 / (DZ * (NZ - 1)), S_BED, Z_UP) },
+  uMoonDir: { value: moonDir }, uMoonLight: { value: new THREE.Color() }, uAmbient: { value: new THREE.Color() }, uDeep: { value: new THREE.Color(0x0b1626) },
+  uEnvLod: { value: 8 },
+}]);
+const bedData = new Uint16Array(NX * NZ * 2);
+for (let k = 0; k < NX * NZ; k++) {
+  bedData[k * 2] = THREE.DataUtils.toHalfFloat(bedH[k]);
+  bedData[k * 2 + 1] = THREE.DataUtils.toHalfFloat(bedStone[k]);
+}
+const bedTex = new THREE.DataTexture(bedData, NX, NZ, THREE.RGFormat, THREE.HalfFloatType);
+bedTex.minFilter = bedTex.magFilter = THREE.LinearFilter;
+bedTex.unpackAlignment = 1;                      // rows of 16-bit values are not a multiple of four bytes long
+bedTex.needsUpdate = true;
+waterUniforms.tBed.value = bedTex;
+
+let water;
+await stage('正在引泉', 56, () => {
+  const COLS = 37, rows = [];
+  for (let z = Z_UP; z < Z_DOWN; z += 0.3) rows.push(z);
+  rows.push(Z_DOWN);
+  const pos = new Float32Array(rows.length * COLS * 3), nrm = new Float32Array(rows.length * COLS * 3), idx = new Uint32Array((rows.length - 1) * (COLS - 1) * 6);
+  let v = 0;
+  for (let j = 0; j < rows.length; j++) {
+    const z = rows[j], cx = streamX(z), w = halfWidth(z) + 0.9;                 // the sheet runs on under the banks and is hidden there
+    for (let i = 0; i < COLS; i++, v++) {
+      pos[v * 3] = cx + ((i / (COLS - 1)) * 2 - 1) * w; pos[v * 3 + 2] = z;
+      nrm[v * 3 + 1] = 1;
+    }
+  }
+  let q = 0;
+  for (let j = 0; j < rows.length - 1; j++) for (let i = 0; i < COLS - 1; i++) {
+    const a = j * COLS + i, b = a + COLS;
+    idx[q++] = a; idx[q++] = b; idx[q++] = a + 1; idx[q++] = b; idx[q++] = b + 1; idx[q++] = a + 1;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: waterUniforms, lights: true, fog: true, transparent: true, depthWrite: false,
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_vertex>
+      #include <shadowmap_pars_vertex>
+      uniform float uTime;
+      varying vec3 vWorld;
+      void main() {
+        vec3 p = position;
+        p.y += sin(p.z * 2.1 + uTime * 2.3 + p.x * 1.7) * 0.006 + sin(p.z * 5.3 - uTime * 3.1 + p.x * 4.1) * 0.003;
+        vec4 worldPosition = modelMatrix * vec4(p, 1.0);
+        vWorld = worldPosition.xyz;
+        vec4 mvPosition = viewMatrix * worldPosition;
+        vec3 transformedNormal = normalMatrix * normal;
+        #include <shadowmap_vertex>
+        #include <fog_vertex>
+        gl_Position = projectionMatrix * mvPosition;
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_fragment>
+      #include <shadowmap_pars_fragment>
+      uniform float uTime;
+      uniform vec2 uResolution;
+      uniform vec4 uBedParam;
+      uniform vec3 uMoonDir, uMoonLight, uAmbient, uDeep;
+      uniform float uEnvLod;
+      uniform sampler2D tBed; uniform sampler2D tNormal; uniform sampler2D tNoise; uniform sampler2D tRefract;
+      uniform samplerCube tEnv;
+      varying vec3 vWorld;
+      ${streamGLSL}
+      vec2 bedSample(vec2 wp) {                                     // height of the bed, and how much of a stone it is
+        return texture2D(tBed, vec2((wp.x - streamX(wp.y) + uBedParam.z) * uBedParam.x, (wp.y - uBedParam.w) * uBedParam.y)).rg;
+      }
+      float bedHeight(vec2 wp) { return bedSample(wp).r; }
+      void main() {
+        float z = vWorld.z, s = vWorld.x - streamX(z);
+        vec2 bed = bedSample(vWorld.xz);
+        float depth = max(vWorld.y - bed.r, 0.0);
+
+        // Flow frame: T points downstream, B across the stream. Shallow water runs fast.
+        float dx = streamDX(z);
+        vec2 T = normalize(vec2(dx, 1.0)), B = vec2(T.y, -T.x);
+        float travel = uTime * clamp(1.1 / (0.07 + depth * 2.2), 0.55, 3.2);
+        float dist = length(cameraPosition - vWorld);
+        float detail = 1.0 / (1.0 + dist * 0.035);                      // ripples fade with distance instead of shimmering
+
+        // Two ripple maps scrolling at different speeds and scales.
+        vec2 slope = (texture2D(tNormal, vec2(s * 2.2, z * 1.3 - travel * 1.25)).xy * 2.0 - 1.0) * 0.75
+                   + (texture2D(tNormal, vec2(z * 3.4 - travel * 2.4, s * 5.5 + 3.7)).xy * 2.0 - 1.0) * 0.5;
+        float chop = mix(0.55, 1.25, smoothstep(0.3, 0.05, depth)) * detail;
+        vec2 ws = (B * slope.x + T * slope.y) * 0.42 * chop;             // ripple slope, in world xz
+        vec3 N = normalize(vec3(ws.x, 1.0, ws.y));
+        vec3 V = normalize(cameraPosition - vWorld);
+
+        // Moon shadow of the pines on this spot: no moonlight, no glints.
+        float shadow = 1.0;
+        #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+          shadow = getShadow( directionalShadowMap[ 0 ], directionalLightShadows[ 0 ].shadowMapSize, directionalLightShadows[ 0 ].shadowIntensity,
+                              directionalLightShadows[ 0 ].shadowBias, directionalLightShadows[ 0 ].shadowRadius, vDirectionalShadowCoord[ 0 ] );
+        #endif
+
+        // The bed seen through the surface: the opaque pass, bent by the ripples and tinted with depth.
+        vec2 suv = gl_FragCoord.xy / uResolution;
+        vec2 refr = N.xz * (0.02 + 0.09 * clamp(depth * 2.0, 0.0, 1.0)) / vec2(uResolution.x / uResolution.y, 1.0);
+        vec3 transmit = exp(-depth * vec3(1.5, 0.5, 0.34));
+        vec3 body = texture2D(tRefract, suv + refr).rgb * transmit + uDeep * (1.0 - transmit.g);
+
+        // Sky and pines mirrored in the surface, blurred in proportion to the chop.
+        vec3 R = reflect(-V, N);
+        R.y = max(R.y, 0.015);
+        float rough = clamp(0.03 + length(ws) * 0.35 + dist * 0.0012, 0.03, 0.4);
+        vec3 refl = textureLod(tEnv, R, uEnvLod * rough * (2.0 - rough)).rgb;
+        float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+        vec3 col = mix(body, refl, fresnel);
+
+        // The moon itself, broken into moving glints by the ripples.
+        float mcos = dot(R, uMoonDir);
+        float sheen = smoothstep( ${glsl(Math.cos(MOON_RADIUS * 4.2))}, ${glsl(Math.cos(MOON_RADIUS))}, mcos );     // the waves scatter it wide
+        float hard = smoothstep( ${glsl(Math.cos(MOON_RADIUS * 1.5))}, ${glsl(Math.cos(MOON_RADIUS * 0.9))}, mcos );
+        float sparkle = pow( smoothstep( 0.58, 0.9, texture2D( tNoise, vec2( s * 9.0, z * 5.0 - travel * 6.0 ) ).a ), 2.0 );
+        col += uMoonLight * shadow * ( hard * sparkle * 4.0 + sheen * ( 0.05 + 0.25 * sparkle ) );
+
+        // Foam. Contact foam is the water thinning against a stone or the bank; aerated foam is churned
+        // over a stony riffle;
+        // a stone just upstream leaves a wake, and a stone just downstream means this is the bow wave.
+        float n1 = texture2D(tNoise, vec2(s * 2.2, z * 0.9 - travel * 1.5)).r;
+        float n2 = texture2D(tNoise, vec2(s * 5.5 + 2.3, z * 2.4 - travel * 2.4)).g;
+        float n3 = texture2D(tNoise, vec2(s * 0.7 + 5.1, z * 0.25)).b;            // slow patches: foam comes and goes in stretches
+        float contact = 1.0 - smoothstep(0.006, 0.035, depth);
+        float aerated = smoothstep(0.25, 0.7, bed.g) * smoothstep(0.2, 0.06, depth);
+        vec2 fw = vWorld.xz;
+        float wake = step(-0.02, bedHeight(fw - T * 0.35)) * 0.9 + step(-0.02, bedHeight(fw - T * 0.8)) * 0.6 + step(-0.02, bedHeight(fw - T * 1.4)) * 0.35;
+        float bow = step(0.0, bedHeight(fw + T * 0.16));
+        float lace = n2 * 0.75 + n1 * 0.45;
+        float foam = contact * smoothstep(0.7, 1.0, lace + contact * 0.15 + bow * 0.4) * smoothstep(0.3, 0.7, n3 + bow * 0.3);
+        foam += aerated * smoothstep(0.58, 0.88, lace) * (0.3 + 0.7 * smoothstep(0.4, 0.7, n3)) * 0.7;
+        foam += wake * smoothstep(0.62, 0.9, n1 * 0.7 + n2 * 0.45) * smoothstep(0.22, 0.03, depth) * 0.7;
+        foam = clamp(foam, 0.0, 0.85) * mix(0.5, 1.0, detail);
+        col = mix(col, (uAmbient + uMoonLight * shadow) * vec3(0.6, 0.65, 0.72), foam);
+
+        gl_FragColor = vec4(col, smoothstep(0.0, 0.012, depth));
+        #include <fog_fragment>
+      }`,
+  });
+  water = new THREE.Mesh(geo, mat);
+  water.renderOrder = 1;
+  water.frustumCulled = false;
+  fx.push(water);
+  scene.add(water);
+});
+
+// ---------------------------------------------------------------- 6. pines and undergrowth
+// A pine is a leaning trunk, whorls of branches that flatten and droop as they age, and sprays of
+// needles along the outer part of every branch. The wood of every tree is one geometry; the sprays
+// are one instanced mesh of small cards, each spray lit as a little volume rather than as flat quads.
+const windUniform = { value: 0 };
+// onBeforeCompile gets the shader before its #include lines are resolved, so to change a line inside a
+// chunk, hand back the chunk itself with that line rewritten in place of the include.
+const rewriteChunk = (name, from, to) => THREE.ShaderChunk[name].split(from).join(to);     // every occurrence
+const CAM0 = new THREE.Vector3(streamX(7.1) + 1.15, 1.25, 7.1);        // where the home view stands, in the stream
+
+// Needles, grass and ferns all share these changes to the standard material: they sway, and their
+// normal is whatever the geometry says, on both faces.
+function patchFoliage(material, { flex, translucency = 0 }) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = skyUniforms.uTime;
+    shader.uniforms.uWind = windUniform;
+    shader.uniforms.uMoonDir = { value: moonDir };
+    shader.uniforms.uMoonLight = waterUniforms.uMoonLight;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vec3 swayAt = vec3( instanceMatrix[ 3 ][ 0 ], instanceMatrix[ 3 ][ 1 ], instanceMatrix[ 3 ][ 2 ] );
+          float swayScale = length( vec3( instanceMatrix[ 0 ][ 0 ], instanceMatrix[ 0 ][ 1 ], instanceMatrix[ 0 ][ 2 ] ) );
+        #else
+          vec3 swayAt = vec3( 0.0 );
+          float swayScale = 1.0;
+        #endif
+        float swayPhase = swayAt.x * 0.31 + swayAt.z * 0.23 + swayAt.y * 0.17;
+        float sway = sin( uTime * 0.83 + swayPhase ) + 0.45 * sin( uTime * 1.97 + swayPhase * 2.3 );
+        float flex = ${flex};
+        transformed.x += sway * uWind * flex * swayScale;
+        transformed.z += ( cos( uTime * 0.61 + swayPhase * 1.4 ) + 0.4 * sin( uTime * 2.3 + swayPhase ) ) * uWind * 0.6 * flex * swayScale;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uMoonDir;\nuniform vec3 uMoonLight;')
+      .replace('normal *= faceDirection;', 'normal *= 1.0;')
+      .replace('#include <lights_physical_fragment>', rewriteChunk('lights_physical_fragment', 'material.specularF90 = 1.0;', 'material.specularF90 = 0.06;'));
+    if (translucency > 0) {
+      // Looking up at the moon through the needles, they glow a little where the light comes through.
+      shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
+        {
+          vec3 Nw = inverseTransformDirection( normal, viewMatrix );
+          vec3 Vw = inverseTransformDirection( normalize( vViewPosition ), viewMatrix );
+          float lit = 1.0;
+          #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+            lit = getShadow( directionalShadowMap[ 0 ], directionalLightShadows[ 0 ].shadowMapSize, directionalLightShadows[ 0 ].shadowIntensity,
+                             directionalLightShadows[ 0 ].shadowBias, directionalLightShadows[ 0 ].shadowRadius, vDirectionalShadowCoord[ 0 ] );
+          #endif
+          outgoingLight += diffuseColor.rgb * uMoonLight * pow( saturate( dot( Vw, - uMoonDir ) ), 4.0 )
+                         * saturate( dot( - Nw, uMoonDir ) * 0.5 + 0.5 ) * lit * ${glsl(translucency)};
+        }
+        #include <opaque_fragment>`);
+    }
+  };
+}
+
+// A tube along a polyline. The ring frames are carried along by parallel transport so it never twists.
+function loftTube(loft, pts, radii, radial, irregular, seed) {
+  const n = pts.length, tangents = [];
+  for (let i = 0; i < n; i++) {
+    const t = new THREE.Vector3();
+    if (i === 0) t.subVectors(pts[1], pts[0]); else if (i === n - 1) t.subVectors(pts[n - 1], pts[n - 2]); else t.subVectors(pts[i + 1], pts[i - 1]);
+    tangents.push(t.normalize());
+  }
+  const nrm = new THREE.Vector3(0, 0, 1);
+  if (Math.abs(tangents[0].z) > 0.9) nrm.set(1, 0, 0);
+  nrm.crossVectors(tangents[0], nrm).normalize();
+  let along = 0;
+  for (let i = 0; i < n; i++) {
+    if (i > 0) {
+      const prev = tangents[i - 1], cur = tangents[i], axis = new THREE.Vector3().crossVectors(prev, cur);
+      if (axis.lengthSq() > 1e-12) nrm.applyAxisAngle(axis.normalize(), Math.acos(clamp(prev.dot(cur), -1, 1)));
+      nrm.addScaledVector(cur, -nrm.dot(cur)).normalize();
+      along += pts[i].distanceTo(pts[i - 1]);
+    }
+    const bin = new THREE.Vector3().crossVectors(tangents[i], nrm);
+    for (let j = 0; j <= radial; j++) {
+      const a = (j / radial) * TAU, ca = Math.cos(a), sa = Math.sin(a);
+      const r = radii[i] * (1 + irregular * noise2(ca * 1.7 + seed, sa * 1.7 + i * 0.7, 91));       // same at j = 0 and j = radial
+      const nx = nrm.x * ca + bin.x * sa, ny = nrm.y * ca + bin.y * sa, nz = nrm.z * ca + bin.z * sa;
+      loft.pos.push(pts[i].x + nx * r, pts[i].y + ny * r, pts[i].z + nz * r);
+      loft.nrm.push(nx, ny, nz);
+      loft.uv.push((j / radial) * Math.max(1, (radii[0] * TAU) / 0.6), along / 0.6);
+    }
+    if (i < n - 1) for (let j = 0; j < radial; j++) {
+      const a = loft.base + i * (radial + 1) + j, b = a + radial + 1;
+      loft.idx.push(a, a + 1, b, b, a + 1, b + 1);
+    }
+  }
+  loft.base += n * (radial + 1);
+}
+
+const woodNear = { pos: [], nrm: [], uv: [], idx: [], base: 0 }, woodFar = { pos: [], nrm: [], uv: [], idx: [], base: 0 };
+const spraysNear = [], spraysFar = [];           // needle sprays, by how far from the home view their tree stands
+let sprays, forest;                             // the instanced mesh of sprays, and the group of everything that grows
+const treeSpots = [];
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3(), _f = new THREE.Vector3();
+
+function addSpray(list, x, y, z, rng, size, flat, bright, wide) {
+  list.push({ x, y, z, yaw: rng() * TAU, tilt: (rng() - 0.5) * 0.5, size: size * (wide ? 1.35 : 1), flat,
+    r: bright * (0.9 + 0.2 * rng()), g: bright, b: bright * (0.9 + 0.2 * rng()) });
+}
+
+// `detail` thins whorls, sprays and ring segments together: 1 near the camera, down to 0.4 far up the slopes.
+function buildPine(x, z, o, rng) {
+  const H = o.H, detail = o.detail ?? 1, near = detail > 0.8, mid = detail > 0.5;
+  const dir = o.dir ?? rng() * TAU, wob = rng() * 20, amp = 0.03 * H;
+  const groundY = heightAt(x, z);
+  const ctrl = [];
+  for (let i = 0; i <= 6; i++) {                                   // the trunk: an S-curve leaning with height
+    const f = i / 6, reach = (o.lean ?? 0.1) * H * Math.pow(f, 1.5);
+    ctrl.push(new THREE.Vector3(
+      x + Math.cos(dir) * reach + Math.sin(f * 3.1 + wob) * amp + (rng() - 0.5) * amp * 1.4,
+      groundY - 0.7 + f * (H + 0.7),
+      z + Math.sin(dir) * reach + Math.cos(f * 2.3 + wob * 1.7) * amp + (rng() - 0.5) * amp * 1.4));
+  }
+  const N = near ? 12 : mid ? 8 : 5;
+  const spine = new THREE.CatmullRomCurve3(ctrl, false, 'catmullrom', 0.5).getSpacedPoints(N);
+  const r0 = 0.034 * H * (o.thickness ?? 1);
+  const radiusAt = (f) => Math.max(0.02, r0 * (1 - 0.86 * f)) * (1 + 0.9 * Math.exp((-Math.max(0, f * H)) / 0.45));
+  const wood = near ? woodNear : woodFar, sprayList = near ? spraysNear : spraysFar;
+  loftTube(wood, spine, spine.map((_, i) => radiusAt(i / N)), near ? 9 : mid ? 6 : 4, 0.09, rng() * 40);
+  const alongTrunk = (f, out) => { const g = clamp(f, 0, 1) * N, i = Math.min(N - 1, Math.floor(g)); return out.copy(spine[i]).lerp(spine[i + 1], g - i); };
+
+  const crownStart = o.crown ?? 0.4, topF = 0.96;
+  const whorls = Math.max(4, Math.round(((topF - crownStart) * H) / (0.78 / detail)));       // thinned with distance
+  const Lmax = 0.27 * H;
+  const p0 = _a, p1 = _b, p2 = _c, q = _d, tan = _e, base = _f;
+  for (let w = 0; w < whorls; w++) {
+    const f = crownStart + ((topF - crownStart) * (w + 0.6)) / whorls;
+    alongTrunk(f, base);
+    const rel = (f - crownStart) / (topF - crownStart);             // 0 at the foot of the crown, 1 at its top
+    const count = rel > 0.7 ? 2 + (rng() < 0.4 ? 1 : 0) : 3 + (rng() < 0.55 ? 1 : 0);
+    const az0 = w * 2.39996 + rng() * 0.8;                           // golden angle between whorls: branches never stack
+    const len = Lmax * (0.2 + 0.8 * Math.pow(1 - rel, 0.75)) * (0.72 + 0.56 * rng());
+    for (let b = 0; b < count; b++) {
+      const az = az0 + (b / count) * TAU + (rng() - 0.5) * 0.5, ca = Math.cos(az), sa = Math.sin(az);
+      const L = len * (0.8 + 0.4 * rng());
+      const up0 = lerp(0.42, 0.95, rel) * (0.8 + 0.4 * rng());        // young branches leave the trunk steeply,
+      const up1 = lerp(-0.3, 0.28, rel) * (0.6 + 0.8 * rng());        // old ones have drooped at the tip
+      const side = (rng() - 0.5) * 0.5 * L, rB = Math.max(0.012, radiusAt(f) * 0.24);
+      p0.set(base.x + ca * radiusAt(f) * 0.5, base.y, base.z + sa * radiusAt(f) * 0.5);
+      p1.set(p0.x + ca * 0.5 * L - sa * side * 0.5, p0.y + 0.5 * L * up0, p0.z + sa * 0.5 * L + ca * side * 0.5);
+      p2.set(p0.x + ca * L - sa * side, p0.y + L * up1, p0.z + sa * L + ca * side);
+      const nb = near ? 4 : mid ? 3 : 2, bp = [], br = [];
+      for (let i = 0; i <= nb; i++) {
+        const t = i / nb, u = 1 - t, k = u * t * 2, tt = t * t, uu = u * u;
+        bp.push(new THREE.Vector3(uu * p0.x + k * p1.x + tt * p2.x, uu * p0.y + k * p1.y + tt * p2.y, uu * p0.z + k * p1.z + tt * p2.z));
+        br.push(lerp(rB, 0.007, Math.pow(t, 0.8)));
+      }
+      loftTube(wood, bp, br, near ? 4 : 3, 0, 0);
+
+      const nT = Math.max(1, Math.round((1 + L * 1.0) * detail));     // sprays along the outer part of the branch
+      for (let i = 0; i < nT; i++) {
+        const t = lerp(0.34, 1, i / Math.max(1, nT - 1)), u = 1 - t, k = u * t * 2, tt = t * t, uu = u * u;   // one spray sits at the tip
+        q.set(uu * p0.x + k * p1.x + tt * p2.x, uu * p0.y + k * p1.y + tt * p2.y, uu * p0.z + k * p1.z + tt * p2.z);
+        tan.set(u * (p1.x - p0.x) + t * (p2.x - p1.x), 0, u * (p1.z - p0.z) + t * (p2.z - p1.z)).normalize();
+        const lat = (i % 2 ? 1 : -1) * (0.1 + rng() * 0.16) * L;
+        addSpray(sprayList, q.x - tan.z * lat, q.y + 0.04 + rng() * 0.1, q.z + tan.x * lat, rng,
+          (0.95 + 0.55 * rng()) * (0.85 + 0.35 * (1 - rel)) * (i === nT - 1 ? 1.18 : 1), 0.36 + rng() * 0.14, (0.72 + 0.5 * rel) * (0.86 + 0.28 * rng()), !near);
+      }
+    }
+  }
+  alongTrunk(0.975, base);                                          // the crown's topknot
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * TAU + rng();
+    addSpray(sprayList, base.x + Math.cos(a) * 0.3, base.y + (i === 0 ? 0.45 : 0.1) + rng() * 0.2, base.z + Math.sin(a) * 0.3, rng,
+      0.75 + 0.3 * rng(), 0.5, 1.05 + 0.2 * rng(), !near);
+  }
+  treeSpots.push({ x, z });
+}
+
+// One spray: eight unit cards at random orientations, so that from any side some show face on. The
+// normals all point away from the centre, which is what makes the spray shade like a rounded mass.
+function sprayGeometry(seed) {
+  const rng = mulberry32(seed), pos = [], nrm = [], uv = [], idx = [], v = new THREE.Vector3(), rot = new THREE.Matrix4(), e = new THREE.Euler();
+  for (let k = 0; k < 8; k++) {
+    rot.makeRotationFromEuler(e.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI));
+    const ox = (rng() - 0.5) * 0.3, oy = (rng() - 0.5) * 0.3, oz = (rng() - 0.5) * 0.3;
+    for (let c = 0; c < 4; c++) {
+      const cx = c === 1 || c === 2 ? 0.5 : -0.5, cy = c >= 2 ? 0.5 : -0.5;            // on the card, before it is turned
+      v.set(cx, cy, 0).applyMatrix4(rot);
+      pos.push(v.x + ox, v.y + oy, v.z + oz);
+      const l = Math.hypot(v.x + ox, v.y + oy, v.z + oz) || 1;
+      nrm.push((v.x + ox) / l, (v.y + oy) / l, (v.z + oz) / l);
+      uv.push(cx + 0.5, cy + 0.5);
+    }
+    idx.push(k * 4, k * 4 + 1, k * 4 + 2, k * 4, k * 4 + 2, k * 4 + 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+// Three cards through one upright axis, their base at the origin: grass tufts and fern fronds.
+function fanGeometry() {
+  const pos = [], nrm = [], uv = [], idx = [];
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI, ca = Math.cos(a), sa = Math.sin(a);
+    for (const [x, y] of [[-0.5, 0], [0.5, 0], [-0.5, 1], [0.5, 1]]) { pos.push(x * ca, y, x * sa); nrm.push(0, 1, 0); uv.push(x + 0.5, y); }
+    idx.push(k * 4, k * 4 + 1, k * 4 + 2, k * 4 + 1, k * 4 + 3, k * 4 + 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+const mat4 = new THREE.Matrix4(), quat = new THREE.Quaternion(), euler = new THREE.Euler(), scale = new THREE.Vector3(), point = new THREE.Vector3(), tint = new THREE.Color();
+await stage('正在种松', 68, () => {
+  const rng = mulberry32(77);
+  // Trees that frame the home view, placed by hand. `dir` is the bearing it leans toward: 0 is +x,
+  // across the stream from the left bank, and PI the other way. The last but one is the moon pine.
+  [
+    { x: -4.9, z: -2.0, H: 14.5, lean: 0.2, dir: 0.35 },
+    { x: 4.95, z: 2.3, H: 13, lean: 0.22, dir: Math.PI - 0.4 },
+    { s: -6.8, z: -9, H: 15, lean: 0.14, dir: 0.2 },
+    { s: 5.6, z: -12, H: 13.5, lean: 0.12, dir: Math.PI + 0.3 },
+    { s: 9.5, z: -22, H: 15, lean: 0.1, dir: Math.PI - 0.2 },
+    { s: -5.2, z: -19, H: 16, lean: 0.12, dir: -0.3 },
+    { s: -2.3, z: -30, H: 8.3, lean: 0.06, dir: 0.3, crown: 0.42, thickness: 0.8 },
+    { s: 2.5, z: -44, H: 11.5, lean: 0.06, dir: Math.PI + 0.2, crown: 0.4 },
+  ].forEach((t) => buildPine(t.s !== undefined ? streamX(t.z) + t.s : t.x, t.z, { crown: 0.36, ...t }, rng));
+
+  // Then the forest: a jittered grid over both slopes, thinning with distance.
+  for (let gz = -100; gz < 44; gz += 4.1) for (let gx = -72; gx < 72; gx += 4.3) {
+    const x = gx + (rng() - 0.5) * 3.6, z = gz + (rng() - 0.5) * 3.4;
+    const s = x - streamX(z);
+    if (Math.abs(s) < halfWidth(z) + 2.3) continue;                                     // keep both banks clear
+    const dist = Math.hypot(x - CAM0.x, z - CAM0.z);
+    if (rng() > (dist < 42 ? 0.8 : dist < 78 ? 0.45 : 0.18)) continue;
+    const bearing = Math.atan2(x - CAM0.x, CAM0.z - z);
+    if (bearing > -13.5 * DEG && bearing < -4.5 * DEG) continue;                        // leave the moon's window open
+    if (treeSpots.some((t) => (t.x - x) ** 2 + (t.z - z) ** 2 < 7.3)) continue;
+    buildPine(x, z, { H: 9 + rng() * 8, lean: 0.04 + rng() * 0.1, crown: 0.36 + rng() * 0.1, detail: dist < 40 ? 1 : dist < 78 ? 0.6 : 0.4 }, rng);
+  }
+
+  forest = new THREE.Group();
+  const bark = new THREE.MeshStandardMaterial({ map: tex.bark.albedo, normalMap: tex.bark.normal, roughness: 0.92 });
+  for (const [loft, list, far] of [[woodNear, spraysNear, false], [woodFar, spraysFar, true]]) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(loft.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(loft.nrm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(loft.uv, 2));
+    geo.setIndex(new THREE.BufferAttribute(new Uint32Array(loft.idx), 1));
+    const trunks = new THREE.Mesh(geo, bark);
+    trunks.castShadow = true;
+    trunks.receiveShadow = true;
+    trunks.frustumCulled = false;
+    forest.add(trunks);
+
+    // Each spray is eight unit cards at random orientations, so that from any side some show face on.
+    const needleMat = new THREE.MeshStandardMaterial({ map: tex.needle, alphaTest: 0.38, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.8 });
+    patchFoliage(needleMat, { flex: 'length( position ) * 0.5', translucency: 0.35 });
+    const mesh = new THREE.InstancedMesh(sprayGeometry(5), needleMat, list.length);
+    list.forEach((t, i) => {
+      euler.set(t.tilt, t.yaw, t.tilt * 0.7); quat.setFromEuler(euler);
+      point.set(t.x, t.y, t.z); scale.set(t.size, t.size * t.flat, t.size * 0.86);
+      mesh.setMatrixAt(i, mat4.compose(point, quat, scale));
+      mesh.setColorAt(i, tint.setRGB(t.r, t.g, t.b));
+    });
+    mesh.instanceColor.needsUpdate = true;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    if (far) mesh.name = 'far';                       // the refraction pass leaves these out
+    forest.add(mesh);
+    if (!far) sprays = mesh;
+  }
+  scene.add(forest);
+
+  // Undergrowth along the banks: grass on the gravel, ferns a little further up under the trees.
+  const under = mulberry32(91);
+  const scatterCards = (texture, count, zFrom, zTo, gap, spread, sizeMin, sizeMax, flex, shade) => {
+    const mesh = new THREE.InstancedMesh(fanGeometry(), new THREE.MeshStandardMaterial({ map: texture, alphaTest: 0.4, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.85 }), count);
+    patchFoliage(mesh.material, { flex });
+    for (let i = 0; i < count; i++) {
+      const z = zFrom + under() * (zTo - zFrom), side = under() < 0.5 ? -1 : 1;
+      const s = side * (halfWidth(z) + gap + under() * under() * spread);
+      point.set(streamX(z) + s, heightAt(streamX(z) + s, z) - 0.03, z);
+      const size = sizeMin + under() * (sizeMax - sizeMin);
+      euler.set((under() - 0.5) * 0.25, under() * TAU, (under() - 0.5) * 0.25); quat.setFromEuler(euler);
+      scale.set(size * (0.8 + under() * 0.5), size, size * (0.8 + under() * 0.5));
+      mesh.setMatrixAt(i, mat4.compose(point, quat, scale));
+      mesh.setColorAt(i, tint.setScalar(shade * (0.8 + under() * 0.4)));
+    }
+    mesh.instanceColor.needsUpdate = true;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  };
+  scatterCards(tex.grass, 900, -34, 16, 0.8, 7, 0.3, 0.75, 'position.y * position.y', 1);
+  scatterCards(tex.fern, 220, -40, 18, 2.2, 9, 0.55, 1.15, 'position.y * position.y', 1.15);
+
+  // Boulders on the banks: a lumpy, flattened sphere with normals taken from its own radius function.
+  const R = (x, y, z) => {
+    const l = Math.hypot(x, y, z) || 1; x /= l; y /= l; z /= l;
+    return 1 + 0.26 * noise2(x * 1.6 + 3, z * 1.6 + y * 0.9, 55) + 0.1 * noise2(x * 4.2, y * 4.2 + z * 4.2 + 3, 56);
+  };
+  const g = (x, y, z) => Math.hypot(x, y, z) - R(x, y, z);
+  const ico = new THREE.IcosahedronGeometry(1, 2), ip = ico.attributes.position, bp = [], bn = [], bu = [], eps = 0.01;
+  for (let i = 0; i < ip.count; i++) {
+    const x = ip.getX(i), y = ip.getY(i), z = ip.getZ(i), r = R(x, y, z);
+    bp.push(x * r, y * r * 0.72, z * r);
+    const nx = g(x + eps, y, z) - g(x - eps, y, z), ny = (g(x, y + eps, z) - g(x, y - eps, z)) / 0.72, nz = g(x, y, z + eps) - g(x, y, z - eps);
+    const l = Math.hypot(nx, ny, nz); bn.push(nx / l, ny / l, nz / l);
+    bu.push(ico.attributes.uv.getX(i), ico.attributes.uv.getY(i));
+  }
+  const boulderGeo = new THREE.BufferGeometry();
+  boulderGeo.setAttribute('position', new THREE.Float32BufferAttribute(bp, 3));
+  boulderGeo.setAttribute('normal', new THREE.Float32BufferAttribute(bn, 3));
+  boulderGeo.setAttribute('uv', new THREE.Float32BufferAttribute(bu, 2));
+  if (ico.index) boulderGeo.setIndex(ico.index);
+  const boulders = new THREE.InstancedMesh(boulderGeo, new THREE.MeshStandardMaterial({ map: tex.rock.albedo, normalMap: tex.rock.normal, roughness: 0.5 }), 90);
+  for (let i = 0; i < 90; i++) {
+    const z = -44 + under() * 66, side = under() < 0.5 ? -1 : 1, s = side * (halfWidth(z) + 0.6 + under() * 3.2), x = streamX(z) + s;
+    const size = 0.22 + under() * under() * 1.0, y = heightAt(x, z) - size * 0.28;
+    euler.set(under() * TAU, under() * TAU, under() * TAU); quat.setFromEuler(euler);
+    point.set(x, y, z); scale.setScalar(size);
+    boulders.setMatrixAt(i, mat4.compose(point, quat, scale));
+    boulders.setColorAt(i, tint.setScalar(lerp(1, 0.5, smoothstep(1.0, 0.1, y))));      // wet ones near the water are darker
+  }
+  boulders.instanceColor.needsUpdate = true;
+  boulders.castShadow = true;
+  boulders.receiveShadow = true;
+  boulders.frustumCulled = false;
+  scene.add(boulders);
+});
+
+// ---------------------------------------------------------------- 7. atmosphere
+// Mist lying on the water: soft upright cards that drift slowly downstream and wrap. Each one is
+// brighter where the line of sight through it points at the moon.
+await stage('正在起雾', 76, () => {
+  const COUNT = 34, rng = mulberry32(131);
+  const geo = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(1, 1));
+  const seed = new Float32Array(COUNT * 4);
+  for (let i = 0; i < COUNT; i++) {
+    const z = Z_UP + rng() * (Z_DOWN - Z_UP);
+    seed.set([(rng() * 2 - 1) * (halfWidth(z) + 3), z, 10 + rng() * 16, 1.6 + rng() * 2.6], i * 4);
+  }
+  geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 4));
+  geo.instanceCount = COUNT;
+  const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+    tMist: { value: tex.mist }, uColor: { value: NIGHT.fog.clone().multiplyScalar(1.3) }, uMoonDir: { value: moonDir },
+    uMoonColor: { value: NIGHT.moon }, uOpacity: { value: 0.035 },
+  }]);
+  uniforms.uTime = skyUniforms.uTime;
+  const mist = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, fog: true,
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_vertex>
+      attribute vec4 aSeed;                                       // lateral offset, place along the stream, width, height
+      uniform float uTime;
+      ${streamGLSL}
+      varying vec2 vUv;
+      varying float vFade;
+      varying vec3 vWorld;
+      void main() {
+        float z = ${glsl(Z_UP)} + mod( aSeed.y - ${glsl(Z_UP)} + uTime * ( 0.14 + 0.1 * fract( aSeed.x * 7.31 ) ), ${glsl(Z_DOWN - Z_UP)} );
+        float s = aSeed.x + sin( uTime * 0.05 + aSeed.y * 0.7 ) * 1.5;
+        vec3 right = vec3( viewMatrix[ 0 ][ 0 ], viewMatrix[ 1 ][ 0 ], viewMatrix[ 2 ][ 0 ] );
+        vec3 world = vec3( streamX( z ) + s, aSeed.w * 0.32, z ) + right * position.x * aSeed.z + vec3( 0.0, 1.0, 0.0 ) * position.y * aSeed.w;
+        vUv = uv;
+        vWorld = world;
+        vec4 mvPosition = viewMatrix * vec4( world, 1.0 );
+        vFade = smoothstep( 2.5, 11.0, - mvPosition.z );           // fade out before the camera can pass through one
+        #include <fog_vertex>
+        gl_Position = projectionMatrix * mvPosition;
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform sampler2D tMist;
+      uniform vec3 uColor;
+      uniform vec3 uMoonDir;
+      uniform vec3 uMoonColor;
+      uniform float uOpacity;
+      varying vec2 vUv;
+      varying float vFade;
+      varying vec3 vWorld;
+      void main() {
+        float toward = pow( max( dot( normalize( vWorld - cameraPosition ), uMoonDir ), 0.0 ), 6.0 );
+        gl_FragColor = vec4( uColor * ( 1.0 + 2.0 * toward ) + uMoonColor * toward * 0.25, texture2D( tMist, vUv ).a * uOpacity * vFade );
+        #include <fog_fragment>
+      }`,
+  }));
+  mist.frustumCulled = false;
+  mist.renderOrder = 3;
+  fx.push(mist);
+  scene.add(mist);
+});
+
+// Motes in the moonlight: a few slow, softly pulsing points among the pines, mostly silver, a few amber.
+let motes;
+{
+  const COUNT = 120, rng = mulberry32(141);
+  const pos = new Float32Array(COUNT * 3), seed = new Float32Array(COUNT * 4);
+  for (let i = 0; i < COUNT; i++) {
+    const z = -46 + rng() * 62, side = rng() < 0.5 ? -1 : 1;
+    pos.set([streamX(z) + side * (halfWidth(z) + 1.2 + rng() * 11), 0.3 + rng() * 3.4, z], i * 3);
+    seed.set([rng() * 40, 0.12 + rng() * 0.2, 2.2 + rng() * 3.2, rng() < 0.35 ? 1 : 0], i * 4);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+  motes = new THREE.Points(geo, new THREE.ShaderMaterial({
+    uniforms: { uTime: skyUniforms.uTime, uScale: { value: 14 }, uSilver: { value: new THREE.Color(0.72, 0.82, 1.0) }, uAmber: { value: new THREE.Color(1.0, 0.72, 0.36) } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */`
+      attribute vec4 aSeed;                                       // phase, speed, size, warmth
+      uniform float uTime;
+      uniform float uScale;
+      varying float vGlow;
+      varying float vWarm;
+      void main() {
+        float t = uTime * aSeed.y, ph = aSeed.x;
+        vec3 p = position + vec3( sin( t + ph ) * 0.7, sin( t * 0.7 + ph * 2.0 ) * 0.4, cos( t * 0.8 + ph * 3.0 ) * 0.7 );
+        vec4 mv = modelViewMatrix * vec4( p, 1.0 );
+        gl_PointSize = min( aSeed.z * uScale / - mv.z, 22.0 );
+        vGlow = ( 0.25 + 0.75 * pow( 0.5 + 0.5 * sin( uTime * ( 0.35 + aSeed.y ) + ph * 5.0 ), 3.0 ) ) * ( 1.0 - smoothstep( 38.0, 60.0, - mv.z ) );
+        vWarm = aSeed.w;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform vec3 uSilver;
+      uniform vec3 uAmber;
+      varying float vGlow;
+      varying float vWarm;
+      void main() {
+        float d = length( gl_PointCoord - 0.5 ) * 2.0;
+        gl_FragColor = vec4( mix( uSilver, uAmber, vWarm ) * 1.6, exp( - d * d * 6.0 ) * ( 1.0 - smoothstep( 0.7, 1.0, d ) ) * vGlow );
+      }`,
+  }));
+  motes.frustumCulled = false;
+  motes.renderOrder = 4;
+  fx.push(motes);
+  scene.add(motes);
+}
+
+// Leaves carried down on the current: small warm flecks that show which way the water runs.
+const LEAVES = 18, leafData = [];
+const leaves = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.2, 0.1),
+  new THREE.MeshStandardMaterial({ map: tex.leaf, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.55 }), LEAVES);
+leaves.frustumCulled = false;
+leaves.renderOrder = 2;
+fx.push(leaves);
+scene.add(leaves);
+{
+  const rng = mulberry32(151);
+  for (let i = 0; i < LEAVES; i++) leafData.push({ s: (rng() * 2 - 1) * 0.7, z0: rng() * 74, speed: 0.45 + rng() * 0.35, spin: (rng() - 0.5) * 0.8, phase: rng() * TAU, size: 0.7 + rng() * 0.6 });
+}
+function updateLeaves(t) {
+  for (let i = 0; i < LEAVES; i++) {
+    const d = leafData[i], z = -52 + ((d.z0 + t * d.speed) % 74);                    // from 52 m upstream to 22 m down
+    const s = d.s * halfWidth(z) + Math.sin(t * 0.7 + d.phase) * 0.15;
+    euler.set(0.12 * Math.sin(t * 1.3 + d.phase), d.phase + t * d.spin, 0.1 * Math.cos(t * 1.1 + d.phase)); quat.setFromEuler(euler);
+    point.set(streamX(z) + s, 0.012 + 0.005 * Math.sin(t * 2.1 + d.phase), z);
+    scale.setScalar(bedAt(s, z) < -0.035 ? d.size : 0);                               // a leaf grounding on a stone disappears
+    leaves.setMatrixAt(i, mat4.compose(point, quat, scale));
+  }
+  leaves.instanceMatrix.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------- 8. lighting
+// One moonlight with shadows, a faint sky bounce, and a cubemap of the scene itself for everything
+// wet or glossy to reflect. The fog is the colour of the mist at the foot of the ridges.
+const moonLight = new THREE.DirectionalLight(NIGHT.moonLight, 3.0);
+moonLight.target.position.set(0, 0, -22);
+moonLight.position.copy(moonLight.target.position).addScaledVector(moonDir, 240);
+moonLight.castShadow = true;
+const small = Math.min(screen.width, screen.height) < 700 || renderer.capabilities.maxTextureSize < 8192;
+Object.assign(moonLight.shadow.camera, { left: -62, right: 62, top: 96, bottom: -96, near: 60, far: 420 });
+moonLight.shadow.camera.updateProjectionMatrix();
+moonLight.shadow.mapSize.set(small ? 2048 : 4096, small ? 2048 : 4096);
+moonLight.shadow.bias = -0.0004;
+moonLight.shadow.normalBias = 0.06;
+moonLight.shadow.radius = 2.5;
+const bounce = new THREE.HemisphereLight(NIGHT.skyBounce, NIGHT.groundBounce, 1.5);
+scene.add(moonLight, moonLight.target, bounce);
+scene.fog = new THREE.FogExp2(NIGHT.fog, 0.007);
+waterUniforms.uMoonLight.value.copy(NIGHT.moonLight).multiplyScalar(moonLight.intensity);
+waterUniforms.uAmbient.value.copy(NIGHT.skyBounce).multiplyScalar(bounce.intensity * 0.4);
+
+// ---------------------------------------------------------------- 9. post-processing
+// Written by hand from render targets and full-screen passes, so the scene needs three.js core only.
+// Each frame: an opaque pass at half resolution for the water to refract; the main pass into a
+// multisampled HDR target whose depth is resolved to a texture; a bright pass and three sizes of
+// bloom; the moon shafts; then one composite pass that tone-maps and grades to the screen.
+const envRT = await stage('正在映月', 82, () => {
+  // The sky and the pines, caught once in a cubemap: it lights whatever is wet, and the water mirrors it.
+  fx.forEach((o) => { o.visible = false; });
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromScene(scene, 0, 0.8, 2600, { size: 256, position: new THREE.Vector3(0.8, 0.8, -2) });
+  pmrem.dispose();
+  fx.forEach((o) => { o.visible = true; });
+  return env;
+});
+scene.environment = envRT.texture;
+scene.environmentIntensity = 1.0;
+waterUniforms.tEnv.value = envRT.texture;
+waterUniforms.uEnvLod.value = Math.log2(envRT.width);
+
+const HDR = THREE.HalfFloatType;
+const passCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const passScene = new THREE.Scene();
+const passMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), null);
+passMesh.frustumCulled = false;
+passScene.add(passMesh);
+const runPass = (material, target) => { passMesh.material = material; renderer.setRenderTarget(target); renderer.render(passScene, passCamera); };
+const passMaterial = (uniforms, fragmentShader) => new THREE.ShaderMaterial({
+  uniforms, vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }`,
+  fragmentShader, depthTest: false, depthWrite: false, toneMapped: false,
+});
+
+const brightMat = passMaterial({ tSrc: { value: null }, uThreshold: { value: 0.7 }, uKnee: { value: 0.35 } }, /* glsl */`
+  uniform sampler2D tSrc;
+  uniform float uThreshold;
+  uniform float uKnee;
+  varying vec2 vUv;
+  void main() {
+    vec3 c = texture2D( tSrc, vUv ).rgb;
+    float l = max( c.r, max( c.g, c.b ) );
+    float soft = clamp( l - uThreshold + uKnee, 0.0, 2.0 * uKnee );             // a soft knee, so the glow fades in
+    soft = soft * soft / ( 4.0 * uKnee + 1e-4 );
+    gl_FragColor = vec4( c * max( soft, l - uThreshold ) / max( l, 1e-4 ), 1.0 );
+  }`);
+
+const blurMat = passMaterial({ tSrc: { value: null }, uDir: { value: new THREE.Vector2() } }, /* glsl */`
+  uniform sampler2D tSrc;
+  uniform vec2 uDir;
+  varying vec2 vUv;
+  void main() {
+    vec3 c = texture2D( tSrc, vUv ).rgb * 0.2270270270;
+    c += ( texture2D( tSrc, vUv + uDir * 1.3846153846 ).rgb + texture2D( tSrc, vUv - uDir * 1.3846153846 ).rgb ) * 0.3162162162;
+    c += ( texture2D( tSrc, vUv + uDir * 3.2307692308 ).rgb + texture2D( tSrc, vUv - uDir * 3.2307692308 ).rgb ) * 0.0702702703;
+    gl_FragColor = vec4( c, 1.0 );
+  }`);
+
+// Moon shafts: march from each pixel towards the moon's place on screen and gather the bright sky
+// that is still visible along the way. Pines only occlude, so what comes out is light streaming
+// between them. Only the sky counts as a source, which is what the depth texture is for.
+const SHAFT_SAMPLES = 56;
+const shaftMat = passMaterial({
+  tSrc: { value: null }, tDepth: { value: null }, uLight: { value: new THREE.Vector2(0.5, 0.5) },
+  uAspect: { value: 1.6 }, uDensity: { value: 0.74 }, uDecay: { value: 0.956 }, uWeight: { value: 0.04 },
+}, /* glsl */`
+  #define SAMPLES ${SHAFT_SAMPLES}
+  uniform sampler2D tSrc;
+  uniform sampler2D tDepth;
+  uniform vec2 uLight;
+  uniform float uAspect;
+  uniform float uDensity;
+  uniform float uDecay;
+  uniform float uWeight;
+  varying vec2 vUv;
+  void main() {
+    vec2 aspect = vec2( uAspect, 1.0 );
+    vec2 toLight = ( uLight - vUv ) * aspect;
+    vec2 stride = normalize( toLight ) * ( length( toLight ) * uDensity / float( SAMPLES ) ) / aspect;
+    float below = smoothstep( 0.0, 0.22, toLight.y / max( length( toLight ), 1e-4 ) );   // none beside or above the moon
+    vec2 uv = vUv;
+    float decay = 1.0;
+    vec3 sum = vec3( 0.0 );
+    for ( int i = 0; i < SAMPLES; i ++ ) {
+      uv += stride;
+      if ( uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 ) break;
+      sum += texture2D( tSrc, uv ).rgb * step( 0.9999, texture2D( tDepth, uv ).x ) * decay;
+      decay *= uDecay;
+    }
+    gl_FragColor = vec4( sum * uWeight * below, 1.0 );
+  }`);
+
+const compositeMat = passMaterial({
+  tScene: { value: null }, tBloom0: { value: null }, tBloom1: { value: null }, tBloom2: { value: null }, tShaft: { value: null }, tDepth: { value: null },
+  uInvViewProj: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() }, uFog: { value: NIGHT.fog }, uShaftTint: { value: new THREE.Color(0.72, 0.82, 1.0) },
+  uExposure: { value: 1.4 }, uBloom: { value: 0.22 }, uShaft: { value: 0.0 }, uMist: { value: 0.35 }, uGrain: { value: 0.016 },
+  uTime: skyUniforms.uTime, uResolution: { value: new THREE.Vector2(1, 1) },
+}, /* glsl */`
+  uniform sampler2D tScene;
+  uniform sampler2D tBloom0;
+  uniform sampler2D tBloom1;
+  uniform sampler2D tBloom2;
+  uniform sampler2D tShaft;
+  uniform sampler2D tDepth;
+  uniform mat4 uInvViewProj;
+  uniform vec3 uCamPos;
+  uniform vec3 uFog;
+  uniform vec3 uShaftTint;
+  uniform float uExposure;
+  uniform float uBloom;
+  uniform float uShaft;
+  uniform float uMist;
+  uniform float uGrain;
+  uniform float uTime;
+  uniform vec2 uResolution;
+  varying vec2 vUv;
+  const mat3 ACES_IN = mat3( 0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777 );
+  const mat3 ACES_OUT = mat3( 1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602 );
+  vec3 rrtOdt( vec3 v ) { vec3 a = v * ( v + 0.0245786 ) - 0.000090537; vec3 b = v * ( 0.983729 * v + 0.4329510 ) + 0.238081; return a / b; }
+  vec3 aces( vec3 c ) { return clamp( ACES_OUT * rrtOdt( ACES_IN * ( c / 0.6 ) ), 0.0, 1.0 ); }
+  float hash( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }
+  void main() {
+    vec3 c = texture2D( tScene, vUv ).rgb;
+    c += ( texture2D( tBloom0, vUv ).rgb * 0.5 + texture2D( tBloom1, vUv ).rgb * 0.4 + texture2D( tBloom2, vUv ).rgb * 0.35 ) * uBloom;
+    c += texture2D( tShaft, vUv ).rgb * uShaftTint * uShaft;
+
+    float d = texture2D( tDepth, vUv ).x;
+    if ( d < 1.0 ) {                                           // ground mist: denser the farther away and the closer to the water
+      vec4 w = uInvViewProj * vec4( vUv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
+      float mist = 1.0 - exp( - length( w.xyz / w.w - uCamPos ) * 0.009 * exp( - max( w.y / w.w, 0.0 ) * 1.2 ) );
+      c = mix( c, uFog * 1.25, clamp( mist, 0.0, 0.92 ) * uMist );
+    }
+
+    c = aces( c * uExposure );
+    float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+    c = mix( c, c * vec3( 0.93, 0.98, 1.08 ), ( 1.0 - l ) * 0.55 );              // cool the shadows
+    c = mix( c, c * vec3( 1.05, 1.0, 0.94 ), smoothstep( 0.45, 1.0, l ) * 0.45 ); // warm the highlights
+    c = mix( vec3( l ), c, 1.1 );
+    c *= 1.0 - 0.45 * smoothstep( 0.25, 0.85, length( vUv - 0.5 ) );             // vignette, which also settles the corners for the text
+    c = pow( c, vec3( 1.0 / 2.2 ) );
+    c += ( hash( vUv * uResolution + fract( uTime ) * 61.0 ) - 0.5 ) * uGrain;
+    gl_FragColor = vec4( c, 1.0 );
+  }`);
+
+let rtScene = null, rtRefract = null, rtBright = null, rtShaft = null, rtBlur = [];
+let viewW = 1, viewH = 1, renderScale = 1;
+function allocateTargets() {
+  [rtScene, rtRefract, rtBright, rtShaft, ...rtBlur].forEach((t) => t && t.dispose());
+  rtScene = new THREE.WebGLRenderTarget(viewW, viewH, { type: HDR, depthTexture: new THREE.DepthTexture(viewW, viewH) });
+  rtScene.resolveDepthBuffer = true;                            // the shafts need the depth of the resolved image
+  rtRefract = new THREE.WebGLRenderTarget(Math.max(1, viewW >> 1), Math.max(1, viewH >> 1), { type: HDR });
+  waterUniforms.tRefract.value = rtRefract.texture;
+  rtBright = new THREE.WebGLRenderTarget(Math.max(1, viewW >> 1), Math.max(1, viewH >> 1), { type: HDR, depthBuffer: false });
+  rtShaft = new THREE.WebGLRenderTarget(Math.max(1, viewW >> 2), Math.max(1, viewH >> 2), { type: HDR, depthBuffer: false });
+  rtBlur = [1, 2, 3].map((level) => [0, 1].map(() => new THREE.WebGLRenderTarget(Math.max(1, viewW >> (level + 1)), Math.max(1, viewH >> (level + 1)), { type: HDR, depthBuffer: false })));
+}
+
+const viewProjection = new THREE.Matrix4();
+const moonPoint = new THREE.Vector3();
+const passInfo = { refract: null, main: null };
+function render() {
+  fx.forEach((o) => { o.visible = false; });
+  forest.children.forEach((o) => { if (o.name === 'far') o.visible = false; });
+  renderer.setRenderTarget(rtRefract);                         // 1. everything solid near the water, for the water to look through
+  renderer.render(scene, camera);
+  forest.children.forEach((o) => { o.visible = true; });
+  passInfo.refract = { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
+  fx.forEach((o) => { o.visible = true; });
+  renderer.setRenderTarget(rtScene);                           // 2. the whole scene, in HDR
+  renderer.render(scene, camera);
+  passInfo.main = { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
+
+  brightMat.uniforms.tSrc.value = rtScene.texture;             // 3. bloom in three sizes
+  runPass(brightMat, rtBright);
+  let blurred = rtBright;
+  for (const [a, b] of rtBlur) {
+    blurMat.uniforms.tSrc.value = blurred.texture; blurMat.uniforms.uDir.value.set(1 / a.width, 0); runPass(blurMat, a);
+    blurMat.uniforms.tSrc.value = a.texture; blurMat.uniforms.uDir.value.set(0, 1 / a.height); runPass(blurMat, b);
+    blurred = b;
+  }
+
+  // 4. shafts, aimed at wherever the moon is on screen, and faded out as it leaves the frame
+  camera.getWorldDirection(_a);
+  moonPoint.copy(camera.position).addScaledVector(moonDir, 500).project(camera);
+  const offscreen = Math.max(Math.abs(moonPoint.x), Math.abs(moonPoint.y));
+  compositeMat.uniforms.uShaft.value = _a.dot(moonDir) > 0 ? clamp(1.5 - offscreen, 0, 1) * 0.9 : 0;
+  shaftMat.uniforms.tSrc.value = rtBright.texture;
+  shaftMat.uniforms.tDepth.value = rtScene.depthTexture;
+  shaftMat.uniforms.uLight.value.set(moonPoint.x * 0.5 + 0.5, moonPoint.y * 0.5 + 0.5);
+  shaftMat.uniforms.uAspect.value = viewW / viewH;
+  runPass(shaftMat, rtShaft);
+
+  viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
+  compositeMat.uniforms.tScene.value = rtScene.texture;
+  compositeMat.uniforms.tBloom0.value = rtBlur[0][1].texture;
+  compositeMat.uniforms.tBloom1.value = rtBlur[1][1].texture;
+  compositeMat.uniforms.tBloom2.value = rtBlur[2][1].texture;
+  compositeMat.uniforms.tShaft.value = rtShaft.texture;
+  compositeMat.uniforms.tDepth.value = rtScene.depthTexture;
+  compositeMat.uniforms.uInvViewProj.value.copy(viewProjection);
+  compositeMat.uniforms.uCamPos.value.copy(camera.position);
+  compositeMat.uniforms.uResolution.value.set(viewW, viewH);
+  runPass(compositeMat, null);                                 // 5. to the screen
+}
+
+// ---------------------------------------------------------------- 10. camera and views
+// The camera orbits a target in spherical coordinates, with damping. Each of the three views is one
+// such pose; dragging, the wheel and pinching move away from it within limits. When nothing has
+// happened for a few seconds the view starts to wander, very slowly.
+// `spring` stands in the stream and looks upstream at the moon; `moon` looks up along the moonlight
+// through the canopy; `pines` perches above the water, among the crowns, and looks down the stream.
+const VIEWS = {
+  spring: { target: [CAM0.x, 1.05, -6.5], yaw: 0, pitch: Math.asin((CAM0.y - 1.05) / 13.6) / DEG, dist: 13.6, fov: 46, minPitch: 0.6, maxPitch: 26 },
+  moon: { target: [2.0, 1.5, 4.5].map((v, i) => v + 6 * moonDir.getComponent(i)), yaw: -MOON_AZ / DEG, pitch: -MOON_EL / DEG, dist: 6, fov: 50, minPitch: -34, maxPitch: 14 },
+  pines: { target: [-0.3, 3.6, -12], yaw: 2.23, pitch: 7.78, dist: 20.7, fov: 54, minPitch: 2, maxPitch: 24 },
+};
+const orbit = { yaw: 0, pitch: 0, dist: 10, fov: 46, target: new THREE.Vector3() };     // where the camera is
+const goal = { yaw: 0, pitch: 0, dist: 10, target: new THREE.Vector3() };              // where it is heading
+const anchor = { yaw: 0, pitch: 0, dist: 10 };                                          // the centre of its slow wander
+const limit = { minPitch: 0, maxPitch: 0, minYaw: 0, maxYaw: 0, minDist: 3, maxDist: 40 };
+const flight = { active: false, t: 0, from: { yaw: 0, pitch: 0, dist: 0, fov: 0, target: new THREE.Vector3() }, to: null };
+let currentView = VIEWS.spring;
+let drift = !REDUCED, lastInput = 0, dragging = false;
+
+const clampGoal = () => {
+  goal.yaw = clamp(goal.yaw, limit.minYaw, limit.maxYaw);
+  goal.pitch = clamp(goal.pitch, limit.minPitch, limit.maxPitch);
+  goal.dist = clamp(goal.dist, limit.minDist, limit.maxDist);
+};
+// Interrupting a flight or a wander leaves the camera where it is, so nothing jumps.
+const holdStill = () => { flight.active = false; goal.yaw = orbit.yaw; goal.pitch = orbit.pitch; goal.dist = orbit.dist; };
+
+function setView(name, instant = false) {
+  const v = VIEWS[name];
+  if (!v) return;
+  currentView = v;
+  limit.minPitch = v.minPitch * DEG; limit.maxPitch = v.maxPitch * DEG;
+  limit.minYaw = v.yaw * DEG - 75 * DEG; limit.maxYaw = v.yaw * DEG + 75 * DEG;
+  limit.minDist = Math.max(3, v.dist * 0.42); limit.maxDist = v.dist * 1.7;
+  const to = { yaw: v.yaw * DEG, pitch: v.pitch * DEG, dist: v.dist, fov: v.fov, target: new THREE.Vector3(...v.target) };
+  Object.assign(anchor, to);                       // of which it takes yaw, pitch and dist
+  goal.target.copy(to.target);
+  if (instant) {
+    Object.assign(goal, to);
+    Object.assign(orbit, to, { target: to.target.clone() });
+    flight.active = false;
+  } else {
+    flight.from.yaw = orbit.yaw - TAU * Math.round((orbit.yaw - to.yaw) / TAU);      // fly the short way round
+    flight.from.pitch = orbit.pitch; flight.from.dist = orbit.dist; flight.from.fov = orbit.fov;
+    flight.from.target.copy(orbit.target);
+    flight.to = to; flight.t = 0; flight.active = true;
+  }
+  document.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === name));
+  lastInput = time;                                               // the wander starts counting from here
+}
+
+function updateCamera(dt, t) {
+  if (flight.active) {
+    const f = flight, k = smoothstep(0, 1, f.t);
+    orbit.yaw = lerp(f.from.yaw, f.to.yaw, k); orbit.pitch = lerp(f.from.pitch, f.to.pitch, k);
+    orbit.dist = lerp(f.from.dist, f.to.dist, k); orbit.fov = lerp(f.from.fov, f.to.fov, k);
+    orbit.target.lerpVectors(f.from.target, f.to.target, k);
+    Object.assign(goal, { yaw: orbit.yaw, pitch: orbit.pitch, dist: orbit.dist });
+    f.t = Math.min(1, f.t + dt / 2.8);
+    if (f.t >= 1) flight.active = false;
+  } else {
+    const idle = t - lastInput;
+    if (drift && !dragging && idle > 3.5) {         // ease the wander in over the seven seconds after that
+      const w = smoothstep(0, 7, idle - 3.5);
+      goal.yaw = anchor.yaw + Math.sin(idle * 0.11) * 3.2 * DEG * w;
+      goal.pitch = anchor.pitch + Math.sin(idle * 0.083 + 1.3) * 1.0 * DEG * w;
+      goal.dist = anchor.dist * (1 + 0.03 * Math.sin(idle * 0.05) * w);
+    }
+    const k = 1 - Math.exp(-dt * 7);
+    orbit.yaw += (goal.yaw - orbit.yaw) * k;
+    orbit.pitch += (goal.pitch - orbit.pitch) * k;
+    orbit.dist += (goal.dist - orbit.dist) * k;
+    orbit.fov += (currentView.fov - orbit.fov) * k;
+    orbit.target.lerp(goal.target, k);
+  }
+  place();
+}
+
+function place() {
+  const cp = Math.cos(orbit.pitch), aspect = Math.max(innerWidth, 1) / Math.max(innerHeight, 1);
+  const x = orbit.target.x + orbit.dist * Math.sin(orbit.yaw) * cp;
+  const z = orbit.target.z + orbit.dist * Math.cos(orbit.yaw) * cp;
+  const y = Math.max(orbit.target.y + orbit.dist * Math.sin(orbit.pitch), heightAt(x, z) + 0.7, 0.55);   // never in the ground or under the water
+  camera.position.set(x, y, z);
+  camera.lookAt(orbit.target);
+  // On a tall screen the horizontal field would get too narrow, so below 56° the vertical field opens instead.
+  const wide = Math.atan(Math.tan((orbit.fov * DEG) / 2) * aspect);
+  camera.fov = wide < 28 * DEG ? Math.min(78, (2 * Math.atan(Math.tan(28 * DEG) / aspect)) / DEG) : orbit.fov;
+  camera.aspect = aspect;
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();       // the shafts are aimed before the frame's first pass
+  sky.position.copy(camera.position);
+}
+
+// Input: a pointer (mouse or touch) orbits, two pointers pinch, the wheel zooms.
+const canvas = renderer.domElement;
+const pointers = new Map();
+let pinch = 0;
+const pinchDistance = () => { const [p, q] = [...pointers.values()]; return Math.hypot(p[0] - q[0], p[1] - q[1]) || 1; };
+const interact = () => { lastInput = time; $('hint').classList.add('is-hidden'); };
+
+canvas.addEventListener('pointerdown', (e) => {
+  pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  canvas.setPointerCapture(e.pointerId);
+  dragging = true;
+  canvas.classList.add('is-dragging');
+  interact();
+  holdStill();
+  pinch = pointers.size === 2 ? pinchDistance() : 0;
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!pointers.has(e.pointerId)) return;
+  const prev = pointers.get(e.pointerId);
+  pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  interact();
+  if (pointers.size === 1) {
+    const speed = ((camera.fov * DEG) / Math.max(innerHeight, 1)) * 1.3;     // a drag across the height turns about one and a quarter fields
+    goal.yaw -= (e.clientX - prev[0]) * speed;
+    goal.pitch += (e.clientY - prev[1]) * speed;
+  } else if (pointers.size === 2) {
+    const d = pinchDistance();
+    if (pinch) goal.dist *= pinch / d;
+    pinch = d;
+  }
+  clampGoal();
+  Object.assign(anchor, { yaw: goal.yaw, pitch: goal.pitch, dist: goal.dist });   // wander from wherever the view is left
+});
+const release = (e) => {
+  pointers.delete(e.pointerId);
+  pinch = 0;
+  if (!pointers.size) { dragging = false; canvas.classList.remove('is-dragging'); }
+};
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  interact();
+  holdStill();
+  goal.dist *= Math.exp((e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY) * 0.0012);
+  clampGoal();
+  anchor.dist = goal.dist;
+}, { passive: false });
+
+// ---------------------------------------------------------------- 11. ui, sound, main loop
+// The sound of the stream, synthesised: noise in three bands that wander a little, and a scatter of
+// small bubbles. Nothing is downloaded, and it only starts when asked for.
+class StreamSound {
+  constructor() { this.ctx = null; this.on = false; this.timer = 0; }
+  toggle() { if (this.on) this.stop(); else this.start(); return this.on; }
+  start() {
+    if (!this.ctx) this.build();
+    this.ctx.resume();
+    this.on = true;
+    this.master.gain.setTargetAtTime(0.55, this.ctx.currentTime, 0.9);
+    this.bubble();
+  }
+  stop() {
+    this.on = false;
+    clearTimeout(this.timer);
+    this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.35);
+  }
+  build() {
+    const C = new (window.AudioContext || window.webkitAudioContext)();
+    this.ctx = C;
+    this.master = C.createGain();
+    this.master.gain.value = 0;
+    this.master.connect(C.destination);
+    const buffer = C.createBuffer(1, C.sampleRate * 4, C.sampleRate), data = buffer.getChannelData(0);
+    const rng = mulberry32(161);
+    for (let i = 0; i < data.length; i++) data[i] = rng() * 2 - 1;
+    this.out = (node, pan) => {                                 // each band sits a little to one side or the other
+      if (!C.createStereoPanner) return node.connect(this.master);
+      const p = C.createStereoPanner(); p.pan.value = pan; node.connect(p); p.connect(this.master);
+    };
+    const layer = (type, freq, q, gain, pan, lfoRate, lfoDepth) => {
+      const src = C.createBufferSource(), f = C.createBiquadFilter(), g = C.createGain(), lfo = C.createOscillator(), lg = C.createGain();
+      src.buffer = buffer; src.loop = true;
+      f.type = type; f.frequency.value = freq; f.Q.value = q;
+      g.gain.value = gain;
+      lfo.frequency.value = lfoRate; lg.gain.value = lfoDepth;
+      lfo.connect(lg); lg.connect(f.frequency);                   // the band drifts up and down: the water never holds one note
+      src.connect(f); f.connect(g); this.out(g, pan);
+      src.start(); lfo.start();
+    };
+    layer('lowpass', 340, 0.5, 0.5, 0, 0.07, 60);                // the body of the fall
+    layer('bandpass', 820, 0.8, 0.6, -0.35, 0.11, 260);          // the murmur
+    layer('bandpass', 2500, 0.9, 0.22, 0.4, 0.083, 900);         // the hiss over the stones
+  }
+  bubble() {
+    clearTimeout(this.timer);
+    if (!this.on) return;
+    const C = this.ctx, t = C.currentTime + Math.random() * 0.05, f = 700 + Math.random() * 1900;
+    const o = C.createOscillator(), g = C.createGain();
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * (1.4 + Math.random() * 0.6), t + 0.03 + Math.random() * 0.06);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.03 + Math.random() * 0.05, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + 0.06 + Math.random() * 0.1);
+    o.connect(g); this.out(g, Math.random() * 1.6 - 0.8);
+    o.start(t); o.stop(t + 0.2);
+    this.timer = setTimeout(() => this.bubble(), 45 + Math.random() * 260);
+  }
+}
+const sound = new StreamSound();
+const toggleSound = () => $('btn-sound').setAttribute('aria-pressed', String(sound.toggle()));
+const toggleDrift = () => { drift = !drift; $('btn-drift').setAttribute('aria-pressed', String(drift)); };
+function toggleFullscreen() {
+  const el = document.documentElement, exit = document.exitFullscreen || document.webkitExitFullscreen, enter = el.requestFullscreen || el.webkitRequestFullscreen;
+  const settled = (p) => { if (p && p.catch) p.catch(() => {}); };          // being refused is not an error worth showing
+  if (document.fullscreenElement || document.webkitFullscreenElement) settled(exit.call(document));
+  else if (enter) settled(enter.call(el));
+}
+if (document.fullscreenEnabled || document.webkitFullscreenEnabled) $('btn-fullscreen').classList.remove('is-gone');
+$('btn-drift').setAttribute('aria-pressed', String(drift));
+for (const [id, action] of [['btn-drift', toggleDrift], ['btn-sound', toggleSound], ['btn-fullscreen', toggleFullscreen]]) {
+  $(id).addEventListener('click', (e) => { action(); e.currentTarget.blur(); });     // blurred again, so Space keeps meaning "pause the wander"
+}
+document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => { setView(b.dataset.view); b.blur(); }));
+const VIEW_KEYS = { Digit1: 'spring', Digit2: 'moon', Digit3: 'pines', Numpad1: 'spring', Numpad2: 'moon', Numpad3: 'pines' };
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (VIEW_KEYS[e.code]) setView(VIEW_KEYS[e.code]);
+  else if (e.code === 'Space') { e.preventDefault(); toggleDrift(); }
+  else if (e.code === 'KeyM') toggleSound();
+  else if (e.code === 'KeyF') toggleFullscreen();
+});
+if (matchMedia('(pointer: coarse)').matches) $('hint').textContent = '拖动环视 · 双指缩放 · 点按下方切换视角';
+
+// `renderScale` steps down when frames run long and back up when they do not (see adapt, below).
+function resize() {
+  const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
+  const pixels = Math.min(Math.min(window.devicePixelRatio || 1, 2), Math.sqrt(2600000 / (w * h))) * renderScale;   // at most 2x, and about 2.6 megapixels
+  viewW = Math.max(2, Math.round(w * pixels)); viewH = Math.max(2, Math.round(h * pixels));
+  renderer.setPixelRatio(1);
+  renderer.setSize(viewW, viewH, false);
+  allocateTargets();
+  waterUniforms.uResolution.value.set(viewW, viewH);
+  motes.material.uniforms.uScale.value = (14 * viewH) / 1080;            // motes keep their size in pixels at any resolution
+  place();
+}
+let slowTime = 0, counted = 0;
+function adapt(dt, t) {
+  if (STILL || params.has('scale') || t < 5) return;     // not for a still frame, nor with a scale set by hand,
+                                                        // nor in the first seconds, while shaders are still compiling
+  slowTime += dt; counted++;
+  if (counted < 50) return;
+  const avg = slowTime / counted;
+  slowTime = 0; counted = 0;
+  if (avg > 0.03 && renderScale > 0.55) { renderScale = Math.max(0.55, renderScale * 0.85); resize(); }
+  else if (avg < 0.014 && renderScale < 1) { renderScale = Math.min(1, renderScale * 1.1); resize(); }
+}
+
+// The clock starts a little way in, so the water is already moving when the loader lifts.
+let time = params.has('t') ? parseFloat(params.get('t')) || 0 : 14;
+lastInput = time;
+if (params.has('scale')) renderScale = clamp(parseFloat(params.get('scale')) || 1, 0.25, 1);
+setView(VIEWS[params.get('view')] ? params.get('view') : 'spring', true);
+resize();
+window.addEventListener('resize', resize);
+updateLeaves(time);
+renderer.shadowMap.autoUpdate = false;              // nothing that casts a shadow ever moves, so the map is drawn once
+renderer.shadowMap.needsUpdate = true;
+
+let last = performance.now(), presented = false, frozen = false;
+function frame(now) {
+  const dt = clamp((now - last) / 1000, 0, 0.05);
+  last = now;
+  if (!STILL) time += dt;
+  skyUniforms.uTime.value = time;
+  waterUniforms.uTime.value = time;
+  windUniform.value = REDUCED ? 0 : 0.006;
+  updateLeaves(time);
+  if (!frozen) updateCamera(dt, time);
+  render();
+  adapt(dt, time);
+  if (!presented) {
+    presented = true;
+    $('loader').classList.add('is-hidden');
+    document.body.classList.add('is-ready');
+  }
+}
+const loop = (now) => { frame(now); requestAnimationFrame(loop); };
+requestAnimationFrame(loop);
+setInterval(() => { if (performance.now() - last > 200) frame(performance.now()); }, 50);   // keeps frames coming where rAF is withheld
+
+if (DEBUG) {
+  window.__moon = {
+    THREE, scene, camera, renderer, water, terrain, forest, textures: tex, views: VIEWS, setView,
+    lights: [moonLight, bounce], night: NIGHT, post: compositeMat.uniforms, shaft: shaftMat.uniforms, bright: brightMat.uniforms,
+    sprays, freeze: (on) => { frozen = on; }, render,
+    setTime: (t) => { time = t; },
+    stats: () => ({ passes: passInfo, width: viewW, height: viewH, scale: renderScale, sprays: sprays.count }),
+  };
+}
+}
+
+main().catch((err) => {
+  console.error(err);
+  showError(err && err.friendly ? err.message : `场景没能建立起来：${(err && err.message) || err}`);
+});
+</script>
+</body>
+</html>

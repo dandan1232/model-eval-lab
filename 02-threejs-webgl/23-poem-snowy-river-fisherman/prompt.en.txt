@@ -1,0 +1,1 @@
+孤舟蓑笠翁，独钓寒江雪 — "A lone boat, an old man in straw cape and hat, fishing alone in the cold river snow." Build the scene this line depicts as a 3D scene in a web page using three.js.

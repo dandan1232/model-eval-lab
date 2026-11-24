@@ -147,6 +147,10 @@
   <div class="loader" id="loader" role="status" aria-live="polite">
     <span class="loader__ring" aria-hidden="true"></span>
     <span id="loader-text">Saddling the pelican…</span>
+    <noscript>
+      <style>.loader__ring, #loader-text { display: none; }</style>
+      <p>This page draws its pelican with JavaScript and WebGL, which are switched off in this browser.</p>
+    </noscript>
   </div>
 
   <script type="module">
